@@ -1,0 +1,23 @@
+# Terraform
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/tfplan
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/crash.log
+terraform/*.auto.tfvars
+
+# LaTeX build artifacts
+memoria/*.aux
+memoria/*.log
+memoria/*.out
+memoria/*.toc
+memoria/*.lof
+memoria/*.lot
+memoria/*.fls
+memoria/*.fdb_latexmk
+memoria/*.synctex.gz
+
+# Claves privadas generadas localmente
+keys/id_rsa_*
+vnx/conf/ssh/authorized_keys

@@ -1,0 +1,143 @@
+\chapter{Fundamentos de Redes en Linux Aplicados al Escenario}
+
+Kubernetes y VNX no implementan una pila de red propietaria: delegan toda la conmutación, el aislamiento, el etiquetado VLAN, el enrutamiento y el filtrado de paquetes en primitivas nativas del kernel de Linux. Entender qué ocurre exactamente en el kernel permite razonar con rigor sobre cada decisión tomada en la práctica.
+
+\section{Network Namespaces y el Contenedor \texttt{pause}}
+
+Un \textit{namespace} de Linux proporciona a un conjunto de procesos una vista aislada de un subsistema del kernel (\texttt{pid}, \texttt{mount}, \texttt{uts}, \texttt{ipc}, \texttt{cgroup}, \texttt{user} y \texttt{net}). En particular, cada \textbf{network namespace (\texttt{netns})} posee de forma completamente independiente:
+\begin{itemize}
+  \item Su propio juego de interfaces de red (incluido su propio \textit{loopback} \texttt{lo}).
+  \item Su propia tabla de encaminamiento IPv4/IPv6 y su propia caché ARP (\textit{neighbour table}).
+  \item Sus propias tablas de \texttt{netfilter}/\texttt{iptables} y estado de seguimiento de conexiones (\texttt{conntrack}).
+  \item Su propio espacio de puertos TCP/UDP (\textit{sockets}).
+\end{itemize}
+
+En un nodo \textit{worker} de Kubernetes coexisten el \textbf{namespace raíz del nodo} (donde residen las interfaces de la máquina virtual \texttt{e1}, \texttt{e2}, \texttt{e9}, las subinterfaces \texttt{e2.1000} y las reglas \texttt{iptables} de \texttt{kube-proxy}/Calico) y \textbf{un network namespace independiente por cada Pod}.
+
+Cuando el \texttt{kubelet} instancia cualquiera de nuestros Pods (por ejemplo, una réplica de \texttt{web-deployment}), arranca en primer lugar un contenedor ligero de infraestructura llamado \textbf{\texttt{pause}} (\texttt{registry.k8s.io/pause}). Su única misión es crear los namespaces \texttt{net}, \texttt{ipc} y \texttt{uts} del Pod y bloquearse indefinidamente mediante la llamada al sistema \texttt{pause()}. Todos los demás contenedores del mismo Pod ---tanto nuestros \texttt{initContainers} (\texttt{generate-html} y \texttt{setup-ssh-auth}) como el contenedor principal \texttt{nginx-ssh}--- se unen al \texttt{/proc/<PID\_pause>/ns/net} ya existente. De ahí se derivan tres consecuencias arquitectónicas directas en nuestro trabajo:
+\begin{enumerate}
+  \item \textbf{Identidad de red única por Pod}: las dos interfaces que configura CNI en el Pod (\texttt{eth0} por Calico y \texttt{net1} por Multus) pertenecen al \texttt{netns} del \texttt{pause} y son visibles con idéntica IP y MAC por todos los contenedores del Pod.
+  \item \textbf{Persistencia de red ante reinicios}: si el proceso \texttt{nginx} o \texttt{sshd} fallase y \texttt{containerd} recrease el contenedor, el \texttt{pause} permanece vivo conservando intactas sus IPs en Calico y en la VLAN \texttt{1000}.
+  \item \textbf{Coexistencia de servicios en puertos distintos}: dentro de \texttt{dgsgiros/nginx-ssh:latest}, \texttt{sshd} escucha en \texttt{0.0.0.0:22} y \texttt{nginx} en \texttt{0.0.0.0:80} dentro del mismo espacio de sockets sin conflicto.
+\end{enumerate}
+
+\section{Pares \texttt{veth}, Bridges Linux y Open vSwitch (\texttt{VlanNet})}
+
+\subsection{Cables Virtuales \texttt{veth} e Índices Cruzados}
+
+Dado que una interfaz de red solo puede existir en un único \texttt{netns} simultáneamente, para comunicar la red primaria de un Pod con el nodo se emplea un \textbf{par \texttt{veth} (\textit{Virtual Ethernet})}: un túnel bidireccional en memoria donde todo frame Ethernet inyectado por un extremo emerge instantáneamente por el opuesto:
+\begin{itemize}
+  \item En la Práctica 3.1 (con \textbf{Flannel}), el extremo dentro del Pod (\texttt{eth0@if12}) se conectaba a un extremo \texttt{vethXXXXXXXX@if2} esclavizado a un \textbf{Linux bridge} común (\texttt{cni0}), que actuaba como conmutador L2 local y puerta de enlace (\texttt{10.244.X.1/24}).
+  \item En el Trabajo Final (con \textbf{Calico}), desaparece el bridge compartido \texttt{cni0}: el extremo del nodo se denomina \textbf{\texttt{caliXXXXXXXX@if2}} y NO se conecta a ningún bridge L2, sino que opera como un enlace punto a punto enrutado en Capa 3 directamente por el kernel del nodo \textit{worker}. Esto evita tormentas de difusión ARP entre Pods y permite a Calico aplicar listas de control de acceso individuales sobre cada interfaz \texttt{cali*}.
+\end{itemize}
+
+\subsection{Open vSwitch (\texttt{VlanNet}) y Etiquetado IEEE 802.1Q}
+
+Mientras que \texttt{virbr0} es un \textit{Linux bridge} clásico empleado para proporcionar acceso NAT a Internet, la red compartida \textbf{\texttt{VlanNet}} creada por VNX en el host físico del laboratorio es un conmutador virtual \textbf{Open vSwitch (OVS)}.
+
+El estándar \textbf{IEEE 802.1Q} inserta una etiqueta de 4 bytes entre la dirección MAC origen y el campo \textit{EtherType} de la trama Ethernet original:
+\begin{itemize}
+  \item \textbf{TPID (16 bits)}: valor \texttt{0x8100} que identifica una trama etiquetada 802.1Q.
+  \item \textbf{TCI (16 bits)}: compuesto por 3 bits de prioridad \textit{PCP}, 1 bit \textit{DEI} y \textbf{12 bits de VLAN ID (VID)}, permitiendo hasta 4094 redes virtuales aisladas (en nuestro diseño, \textbf{VID = 1000}).
+\end{itemize}
+
+En nuestro escenario convergen dos mecanismos complementarios de etiquetado 802.1Q sobre \texttt{VlanNet}:
+\begin{enumerate}
+  \item \textbf{En los nodos \textit{worker} de Kubernetes (puerto \textit{trunk} + subinterfaz del kernel)}: la interfaz \texttt{e2} de \texttt{k8s-worker1} y \texttt{k8s-worker2} se conecta a \texttt{VlanNet} sin filtro de VLAN en OVS (modo \textit{trunk}). Dentro del sistema operativo de cada \textit{worker}, nuestro script crea la subinterfaz \texttt{e2.1000} mediante \texttt{iproute2}:
+\begin{lstlisting}[language=bash]
+ip link set e2 up
+ip link add link e2 name e2.1000 type vlan id 1000
+ip link set e2.1000 up
+\end{lstlisting}
+  Toda trama transmitida por \texttt{e2.1000} recibe en el kernel del \textit{worker} la cabecera 802.1Q con \texttt{ID=1000} antes de salir por \texttt{e2} hacia \texttt{VlanNet}; recíprocamente, al recibir por \texttt{e2} una trama con \texttt{ID=1000}, el kernel retira la etiqueta y la entrega limpia a \texttt{e2.1000}.
+  \item \textbf{En los contenedores LXC de VNX (puerto \textit{access} en Open vSwitch)}: en \texttt{vnx/k8s\_lxc\_vlan.xml}, la interfaz \texttt{eth1} de los contenedores \texttt{bbdd} y \texttt{logs} incluye \texttt{<vlan><tag id="1000"/></vlan>}. VNX traduce esto en un puerto de acceso OVS (\texttt{ovs-vsctl set port ... tag=1000}): el contenedor LXC transmite tramas Ethernet normales sin etiquetar por \texttt{eth1}, y es el propio switch \texttt{VlanNet} en el host quien inserta la etiqueta \texttt{1000} al entrar al switch y la retira al entregarla al contenedor LXC.
+\end{enumerate}
+
+\section{El Driver \texttt{macvlan} y su Interacción con la Pila IP del Nodo}
+
+Para conectar cada Pod de Kubernetes a la subinterfaz \texttt{e2.1000} sin crear decenas de pares \texttt{veth} ni puentes adicionales, Multus utiliza el plugin CNI \textbf{\texttt{macvlan}} en modo \textbf{\texttt{bridge}}.
+
+\texttt{macvlan} permite crear múltiples interfaces virtuales hijas (\texttt{net1} dentro del \texttt{netns} de cada Pod), cada una dotada de su \textbf{propia dirección MAC única}, vinculadas directamente a una interfaz padre del nodo (\texttt{master: "e2.1000"}). Entre los cuatro modos de operación de \texttt{macvlan} (\textit{private}, \textit{vepa}, \textit{bridge} y \textit{passthru}), el modo \textbf{\texttt{bridge}} resulta imprescindible en nuestro diseño porque incorpora un puente ligero en memoria entre todas las subinterfaces hijas colgadas del mismo padre \texttt{e2.1000}. Gracias a ello, cuando el Pod \texttt{admin} (alojado en \texttt{k8s-worker1}) se comunica por la VLAN con una réplica web que el planificador de Kubernetes haya colocado también en \texttt{k8s-worker1}, la trama se conmuta directamente en memoria dentro de \texttt{e2.1000} sin necesidad de salir al exterior y rebotar (\textit{hairpinning}).
+
+La Figura~\ref{fig:arquitectura-worker1} detalla la anatomía exacta de interfaces y espacios de red en el interior de \texttt{k8s-worker1}:
+
+\begin{figure}[H]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[
+  font=\sffamily\scriptsize,
+  ns/.style={draw=upmaccent, thick, rounded corners=4pt, fill=upmaccent!5, inner sep=6pt},
+  iface/.style={draw=darkslate, fill=white, rounded corners=2pt, inner sep=3pt, align=center},
+  kbox/.style={draw=errred!80!black, fill=errred!6, rounded corners=3pt, inner sep=4pt, align=center},
+  ovsbox/.style={draw=warnamber!90!black, fill=warnamber!10, rounded corners=3pt, thick, inner sep=5pt, align=center},
+  p2p/.style={<->, thick, color=upmblue},
+  l2/.style={<->, very thick, color=upmaccent}
+]
+
+  % Marco del nodo k8s-worker1
+  \node[draw=upmblue, thick, rounded corners=6pt, fill=gray!4, minimum width=14.6cm, minimum height=6.6cm,
+        label={[anchor=north west, font=\sffamily\bfseries\footnotesize, text=upmblue]north west:Nodo \texttt{k8s-worker1} (netns raíz)}] (w1) at (0,0) {};
+
+  % Netns Pod Admin
+  \node[ns, minimum width=5.4cm, minimum height=2.1cm,
+        label={[anchor=north, font=\sffamily\bfseries\scriptsize, text=upmblue]north:\texttt{netns} Pod \texttt{admin} (\texttt{pause})}] (podadm) at (-3.7, 1.7) {};
+  \node[iface] (admeth0) at (-5.1, 1.5) {\texttt{eth0}\\IP Calico};
+  \node[iface, draw=upmaccent, thick] (admnet1) at (-2.3, 1.5) {\texttt{net1} (macvlan)\\\texttt{10.1.2.10/24}};
+
+  % Netns Pod Web
+  \node[ns, minimum width=5.4cm, minimum height=2.1cm,
+        label={[anchor=north, font=\sffamily\bfseries\scriptsize, text=upmblue]north:\texttt{netns} Pod \texttt{web-1} (\texttt{pause})}] (podweb) at (3.7, 1.7) {};
+  \node[iface] (webeth0) at (2.2, 1.5) {\texttt{eth0}\\IP Calico};
+  \node[iface, draw=upmaccent, thick] (webnet1) at (5.1, 1.5) {\texttt{net1} (macvlan)\\\texttt{10.1.2.5x/24}};
+
+  % Interfaces cali* y motor Calico (separado limpiamente de e2.1000)
+  \node[iface] (cali1) at (-5.1, -0.35) {\texttt{cali8a1f...}};
+  \node[iface] (cali2) at (2.2, -0.35) {\texttt{calif39b...}};
+  \node[kbox, minimum width=8.6cm] (routing) at (-2.3, -1.65)
+    {\textbf{Pila IP L3 del Kernel + \texttt{iptables}}\\(\texttt{kube-proxy} DNAT + Calico Felix \texttt{NetworkPolicy})};
+  \node[iface] (e1) at (-2.3, -2.85) {\texttt{e1}: \texttt{10.10.10.11/24} (\texttt{k8s\_LAN})};
+
+  % Subinterfaz VLAN y e2 a la derecha sin solape
+  \node[iface, draw=upmaccent, very thick, minimum width=3.9cm] (e21000) at (4.7, -1.55)
+    {\texttt{e2.1000} (802.1Q VID 1000)\\Puente interno \texttt{macvlan bridge}};
+  \node[iface, draw=upmaccent, thick] (e2) at (4.7, -2.85) {\texttt{e2} (Trunk sin IP)};
+
+  % Switch externo VlanNet
+  \node[ovsbox, minimum width=5.0cm] (vlannet) at (4.7, -4.3)
+    {\textbf{Open vSwitch \texttt{VlanNet} (Host)}\\$\leftrightarrow$ \texttt{k8s-worker2} y LXC \texttt{bbdd}/\texttt{logs}};
+
+  % Conexiones
+  \draw[p2p] (admeth0) -- node[left, font=\sffamily\tiny] {veth} (cali1);
+  \draw[p2p] (webeth0) -- node[left, font=\sffamily\tiny] {veth} (cali2);
+  \draw[p2p] (cali1) -- (routing.north -| cali1);
+  \draw[p2p] (cali2.south) |- ([yshift=3pt]routing.north east);
+  \draw[p2p] (routing) -- (e1);
+
+  \draw[l2] (admnet1.south) -- (-2.3, 0.25) -| ([xshift=-8mm]e21000.north);
+  \draw[l2] (webnet1.south) -- (e21000.north -| webnet1);
+  \draw[l2] (e21000) -- (e2);
+  \draw[l2] (e2) -- (vlannet);
+
+\end{tikzpicture}%
+}
+\caption{Separación física y lógica de planos dentro de \texttt{k8s-worker1}: el tráfico de \texttt{eth0} atraviesa las interfaces \texttt{cali*} y el cortafuegos L3 de Calico, mientras que \texttt{net1} (\texttt{macvlan}) desciende directamente en Capa 2 por \texttt{e2.1000} hacia \texttt{VlanNet}.}
+\label{fig:arquitectura-worker1}
+\end{figure}
+
+\begin{warnbox}{Propiedad Crítica del Plano \texttt{macvlan} en Linux}
+El tráfico emitido por un Pod a través de su interfaz secundaria \texttt{net1} (\texttt{macvlan}) \textbf{no atraviesa la pila de encaminamiento IP ni los ganchos \texttt{iptables} \texttt{FORWARD} de Calico asociados a \texttt{cali*}}. Por tanto:
+\begin{itemize}
+  \item Las \texttt{NetworkPolicies} de Kubernetes aíslan de forma hermética el interfaz primario \texttt{eth0} (acceso HTTP público, acceso SSH exterior desde \texttt{user\_LAN} y bloqueo de salida hacia Internet).
+  \item Simultáneamente, la VLAN \texttt{1000} sobre \texttt{net1} opera como una red de gestión y datos fuera de banda (\textit{out-of-band L2 fabric}) dedicada exclusivamente a los componentes autorizados conectados a \texttt{VlanNet}.
+\end{itemize}
+\end{warnbox}
+
+\section{\texttt{netfilter}, \texttt{iptables} y el Problema del SNAT en \texttt{NodePort}}
+
+En Kubernetes, las direcciones \texttt{ClusterIP} (como la de nuestro \texttt{web-service}) no están asignadas a ninguna interfaz: existen únicamente como reglas de traducción de destino (\textbf{DNAT}) en la tabla \texttt{nat} de \texttt{iptables} mantenida por \texttt{kube-proxy}. Cuando un paquete va dirigido a \texttt{ClusterIP:8080}, la cadena \texttt{KUBE-SERVICES} salta a \texttt{KUBE-SVC-XXX}, la cual distribuye las nuevas conexiones mediante el módulo \texttt{statistic --mode random --probability} entre las cadenas \texttt{KUBE-SEP-*} (\textit{Service Endpoints}), reescribiendo la IP y puerto destino por el \texttt{PodIP:80} elegido y registrando la tupla en \texttt{conntrack}.
+
+Un fenómeno crítico ocurre con los servicios de tipo \textbf{\texttt{NodePort}} (como \texttt{admin-service}):
+\begin{enumerate}
+  \item \textbf{Comportamiento por defecto (\texttt{externalTrafficPolicy: Cluster})}: Kubernetes abre el puerto \texttt{NodePort} en \emph{todos} los nodos del clúster. Si el cliente externo (\texttt{10.10.20.2}) se conecta a un nodo que no aloja el Pod (o incluso al nodo que sí lo aloja bajo política \texttt{Cluster}), \texttt{kube-proxy} marca el paquete con \texttt{KUBE-MARK-MASQ} y le aplica \textbf{SNAT (\texttt{MASQUERADE})} en \texttt{POSTROUTING}, reemplazando la IP origen real del cliente (\texttt{10.10.20.2}) por la IP interna del nodo (\texttt{10.10.10.11}). Esto garantiza que el paquete de respuesta regrese al mismo nodo para deshacer el DNAT, pero \textbf{destruye la visibilidad de la IP origen} ante cualquier \texttt{NetworkPolicy} basada en \texttt{ipBlock}.
+  \item \textbf{Comportamiento configurado (\texttt{externalTrafficPolicy: Local})}: \texttt{kube-proxy} elimina el salto de \texttt{MASQUERADE} y encamina únicamente hacia \textit{endpoints} locales en ese mismo nodo (descartando el tráfico en nodos donde el Pod no esté presente). Combinado con \texttt{nodeSelector: k8s-worker1}, el paquete TCP SYN enviado desde el host (\texttt{10.10.20.2}) a \texttt{10.10.10.11:30022} sufre únicamente DNAT hacia \texttt{PodAdminIP:22}, conservando intacta su cabecera \texttt{SRC=10.10.20.2} cuando Calico evalúa la regla de cortafuegos en \texttt{cali*}.
+\end{enumerate}

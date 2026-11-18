@@ -1,0 +1,133 @@
+\chapter{Introducción y Arquitectura Global del Sistema}
+
+\section{Contexto y Objetivos del Trabajo Final}
+
+La evolución de los servicios telemáticos modernos hacia arquitecturas nativas en la nube (\textit{cloud-native}) exige combinar tres pilares tecnológicos fundamentales: la contenedorización orquestada para lograr elasticidad y auto-reparación (\textbf{Kubernetes}), la virtualización avanzada de redes en sistemas Linux para aislar y acoplar planos de tráfico heterogéneos (\textbf{Calico}, \textbf{Multus}, \textbf{Open vSwitch} y \textbf{VLANs 802.1Q}), y la Infraestructura como Código (\textit{Infrastructure as Code}, \textbf{Terraform}) para garantizar despliegues reproducibles, declarativos y auditables.
+
+Partiendo de la base establecida en las prácticas previas de la asignatura ---la orquestación declarativa sobre OpenStack y Kubernetes con Calico en la \textbf{Práctica 1.4}, la virtualización de redes con Open vSwitch y VLANs en la \textbf{Práctica 2.1}, y el análisis de comunicaciones de Pods, volúmenes, servicios, MetalLB, Ingress y Multus en la \textbf{Práctica 3.1}---, este trabajo final aborda la construcción y automatización completa de una plataforma híbrida en la que conviven aplicaciones contenerizadas en Kubernetes con servicios de infraestructura persistentes desplegados sobre contenedores ligeros de sistema (\textbf{LXC}) mediante \textbf{VNX}.
+
+Los objetivos específicos alcanzados en este proyecto son:
+\begin{enumerate}
+  \item \textbf{Automatización integral en un único flujo (\texttt{01\_deploy\_all.sh})}: desde la generación criptográfica de pares de claves SSH, el arranque del clúster de Kubernetes con Calico (\path{k8s_lab-calico-v02}) y la provisión del nodo dedicado \texttt{terraform} (\path{k8s_lab-terraform.xml} con carpeta compartida \texttt{/shared}), hasta la creación de subinterfaces VLAN en los nodos \textit{worker}, el despliegue automático de contenedores LXC en VNX y la convergencia declarativa con Terraform.
+  \item \textbf{Interconexión híbrida en Capa 2 mediante Multus y VLAN 802.1Q}: integración de los Pods de Kubernetes y los contenedores LXC externos sobre una misma red virtual troncal (\texttt{VlanNet}, VLAN \texttt{1000}, subred \texttt{10.1.2.0/24}), resolviendo la asignación dinámica de direcciones IP para permitir el escalado horizontal sin colisiones.
+  \item \textbf{Gestión segura sin contraseñas mediante Kubernetes \texttt{Secrets}}: separación estricta de credenciales en dos pares de claves SSH independientes (acceso exterior hacia administración y administración hacia servidores internos), gestionados íntegramente desde HCL en Terraform sin recurrir a comandos imperativos de \texttt{kubectl}.
+  \item \textbf{Personalización dinámica del plano de aplicación}: renderizado automático de páginas HTML individualizadas con el nombre e identidad de cada Pod mediante la combinación de un \texttt{ConfigMap} de solo lectura, la \textit{Downward API} de Kubernetes, un volumen compartido \texttt{emptyDir} y un \texttt{initContainer}.
+  \item \textbf{Exposición controlada y seguridad \textit{Zero-Trust}}: publicación HTTP mediante un controlador \textbf{Ingress NGINX} en la ruta de grupo \texttt{/servers-G11} hacia un \texttt{Service ClusterIP}, acceso SSH administrativo vía \texttt{Service NodePort} conservando la IP de origen (\texttt{externalTrafficPolicy: Local}) y aislamiento estricto de entrada y salida mediante tres políticas \texttt{NetworkPolicy} aplicadas por Calico.
+\end{enumerate}
+
+\section{Topología Física y Lógica del Escenario}
+
+La Figura~\ref{fig:topologia-global} ilustra la arquitectura completa implementada siguiendo el escenario de laboratorio de la Práctica 1.4 ampliado con la red VLAN compartida hacia VNX. El sistema se articula sobre los nodos de \texttt{k8s\_LAN} (incluyendo el nodo proveedor \texttt{terraform} en \texttt{10.10.10.13}) y el escenario complementario de contenedores LXC:
+
+\begin{figure}[H]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[
+  font=\sffamily\scriptsize,
+  box/.style={draw=upmblue, rounded corners=3pt, fill=white, thick, align=center, inner sep=5pt},
+  tfbox/.style={draw=Purple!80!black, rounded corners=3pt, fill=Purple!7, thick, align=center, inner sep=4.5pt},
+  pod/.style={draw=upmaccent, rounded corners=6pt, fill=upmaccent!8, thick, align=center, minimum width=2.4cm, minimum height=0.85cm},
+  svc/.style={draw=okgreen!80!black, rounded corners=8pt, fill=okgreen!8, thick, align=center, inner sep=4pt},
+  lxc/.style={draw=warnamber!90!black, cylinder, shape border rotate=90, aspect=0.22, fill=warnamber!10, thick, align=center, minimum width=2.3cm, minimum height=1.3cm},
+  line/.style={-{Stealth[length=2mm]}, thick, color=darkslate},
+  tfline/.style={-{Stealth[length=2mm]}, thick, dashed, color=Purple!80!black},
+  vlanline/.style={very thick, color=upmaccent}
+]
+
+  % Host Exterior, Router r1 y Nodo Terraform
+  \node[box, fill=gray!10, minimum width=2.5cm, minimum height=1.2cm] (host) at (-8.1, 0.8)
+    {\textbf{Host Laboratorio}\\Red \texttt{user\_LAN}\\\texttt{10.10.20.2/24}};
+
+  \node[box, fill=upmblue!8, minimum width=2.0cm, minimum height=1.0cm] (r1) at (-5.1, 0.8)
+    {\textbf{Router \texttt{r1}}\\\texttt{.20.1 $\leftrightarrow$ .10.1}};
+
+  \node[tfbox, minimum width=3.5cm, minimum height=1.15cm] (tfvm) at (-6.5, -2.1)
+    {\textbf{Nodo VNX \texttt{terraform}}\\\texttt{10.10.10.13} (\texttt{/shared})};
+
+  % Caja Cluster Kubernetes
+  \node[draw=upmblue, dashed, thick, rounded corners=5pt, fill=upmblue!2, minimum width=8.6cm, minimum height=7.0cm,
+        label={[anchor=north west, yshift=-1pt, font=\sffamily\bfseries\scriptsize, text=upmblue]north west:Clúster Kubernetes (\texttt{.10.10--.12}, Calico + Multus)}] (k8sbox) at (1.5, 0.25) {};
+
+  % Ingress y Services bien separados
+  \node[svc] (ing) at (-1.4, 1.6) {\textbf{Ingress NGINX}\\\texttt{10.10.10.20}\\\texttt{/servers-G11}};
+  \node[svc] (svcweb) at (1.3, 1.6) {\textbf{web-service}\\ClusterIP \texttt{:8080}};
+  \node[svc] (svcadm) at (0.2, -1.8) {\textbf{admin-service}\\NodePort \texttt{:30022} (\texttt{Local})};
+
+  % Pods Web y Admin
+  \node[pod] (s1) at (4.1, 2.4) {\textbf{Pod Web 1}\\\texttt{nginx-ssh} (\texttt{:80,:22})};
+  \node[pod] (s2) at (4.1, 1.2) {\textbf{Pod Web 2}\\\texttt{nginx-ssh} (\texttt{:80,:22})};
+  \node[pod] (s3) at (4.1, 0.0) {\textbf{Pod Web 3}\\\texttt{nginx-ssh} (\texttt{:80,:22})};
+  \node[pod, fill=upmblue!12, draw=upmblue] (adm) at (4.1, -1.8) {\textbf{Pod \texttt{admin}}\\\texttt{k8s-worker1} (\texttt{10.1.2.10})};
+
+  % Bus VLAN 1000 entre ambas cajas
+  \draw[vlanline] (6.4, 3.1) -- (6.4, -3.25) node[below=2pt, font=\sffamily\bfseries\scriptsize, text=upmaccent] {VLAN 1000 (\texttt{VlanNet})};
+
+  % Caja VNX
+  \node[draw=warnamber!90!black, dashed, thick, rounded corners=5pt, fill=warnamber!3, minimum width=3.1cm, minimum height=7.0cm,
+        label={[anchor=north, font=\sffamily\bfseries\scriptsize, text=warnamber!90!black]north:VNX (LXC)}] (vnxbox) at (8.7, 0.25) {};
+
+  \node[lxc] (bbdd) at (8.7, 1.5) {\textbf{LXC \texttt{bbdd}}\\MariaDB \texttt{:3306}\\\texttt{10.1.2.100}};
+  \node[lxc] (logs) at (8.7, -1.3) {\textbf{LXC \texttt{logs}}\\Rsyslog \texttt{:514} + DHCP\\\texttt{10.1.2.101}};
+
+  % Conexiones HTTP, SSH exterior y Terraform
+  \draw[line] (host) -- (r1);
+  \draw[tfline] (host.south) |- node[pos=0.25, right, font=\sffamily\tiny] {\texttt{/shared}} (tfvm.west);
+  \draw[tfline] (tfvm.east) -- node[below, font=\sffamily\tiny] {API K8s \texttt{:6443}} (k8sbox.west |- tfvm.east);
+
+  \draw[line] (r1.north east) |- node[pos=0.58, above, font=\sffamily\tiny] {HTTP \texttt{:80}} (ing.west);
+  \draw[line] (r1.south east) |- node[pos=0.56, above, font=\sffamily\tiny] {SSH (\texttt{.10.11:30022})} (svcadm.west);
+
+  \draw[line] (ing) -- (svcweb);
+  \draw[line] (svcweb.east) -- (s1.west);
+  \draw[line] (svcweb.east) -- (s2.west);
+  \draw[line] (svcweb.east) -- (s3.west);
+  \draw[line] (svcadm) -- (adm);
+
+  % Conexiones a la VLAN 1000
+  \draw[vlanline] (s1.east) -- (6.4, 2.4);
+  \draw[vlanline] (s2.east) -- (6.4, 1.2);
+  \draw[vlanline] (s3.east) -- (6.4, 0.0);
+  \draw[vlanline] (adm.east) -- (6.4, -1.8);
+  \draw[vlanline] (6.4, 1.5) -- (bbdd.west);
+  \draw[vlanline] (6.4, -1.3) -- (logs.west);
+
+\end{tikzpicture}%
+}
+\caption{Topología híbrida desplegada: nodo proveedor \texttt{terraform} (\texttt{.13}), clúster Kubernetes (Calico + Multus) e infraestructura VNX (LXC) interconectados mediante la VLAN 1000 sobre \texttt{VlanNet}.}
+\label{fig:topologia-global}
+\end{figure}
+
+\subsection{Planos de Red y Direccionamiento Completo}
+
+Para comprender el flujo extremo a extremo de cada paquete sin ambigüedades, es esencial distinguir los seis rangos IP que operan simultáneamente sobre la infraestructura virtualizada (Tabla~\ref{tab:planos-red}):
+
+\begin{table}[H]
+\centering
+\small
+\renewcommand{\arraystretch}{1.25}
+\begin{tabularx}{\textwidth}{l l l X}
+\toprule
+\textbf{Red / Plano} & \textbf{Prefijo CIDR} & \textbf{Interfaz} & \textbf{Propósito y Elementos Conectados} \\
+\midrule
+\texttt{user\_LAN} & \texttt{10.10.20.0/24} & Host $\leftrightarrow$ \texttt{r1} & Red de acceso del usuario en el laboratorio. El host (\texttt{10.10.20.2}) accede a través del router \texttt{r1} (\texttt{10.10.20.1}). \\
+\texttt{k8s\_LAN} & \texttt{10.10.10.0/24} & \texttt{e1} (nodos VNX) & Red troncal: \texttt{r1} (\texttt{.1}), \texttt{k8s-master} (\texttt{.10}), \texttt{k8s-worker1} (\texttt{.11}), \texttt{k8s-worker2} (\texttt{.12}), nodo proveedor \textbf{\texttt{terraform} (\texttt{.13})} y pool MetalLB (\texttt{.20--.30}). \\
+Red Pods Calico & \texttt{10.233.64.0/18} (o \texttt{/16}) & \texttt{eth0} $\leftrightarrow$ \texttt{cali*} & Red primaria CNI de Kubernetes gestionada por Calico (túneles IP-in-IP inter-nodo); gobernada por \texttt{NetworkPolicy}. \\
+Red Services K8s & \texttt{10.96.0.0/12} & Virtual (\texttt{iptables}) & Direcciones \texttt{ClusterIP} virtuales programadas por \texttt{kube-proxy} (no residen en ninguna interfaz física ni virtual). \\
+\texttt{VlanNet} (VLAN 1000) & \texttt{10.1.2.0/24} & \texttt{net1} / \texttt{e2.1000} / \texttt{eth1} & Plano compartido de datos y gestión L2: Pod \texttt{admin} (\texttt{.10}), Pods \texttt{web} (\texttt{.50--.95} DHCP), LXC \texttt{bbdd} (\texttt{.100}) y LXC \texttt{logs} (\texttt{.101}). \\
+\texttt{virbr0} (NAT) & \texttt{192.168.122.0/24} & \texttt{e9} / \texttt{eth9} & Bridge libvirt de salida a Internet para \texttt{k8s-*}, \texttt{terraform} (descarga de proveedores HCL) y contenedores LXC. \\
+\bottomrule
+\end{tabularx}
+\caption{Resumen de los planos de red físicos, virtuales y lógicos del escenario.}
+\label{tab:planos-red}
+\end{table}
+
+\section{Estructura Modular del Proyecto Entregado}
+
+Siguiendo las mejores prácticas de ingeniería de software e Infraestructura como Código, el repositorio desarrollado en \texttt{cnvr\_final/} separa limpiamente la automatización imperativa de plataforma (\texttt{scripts/} y \texttt{vnx/}) de la orquestación declarativa de servicios (\texttt{terraform/}):
+
+\begin{itemize}
+  \item \textbf{\texttt{scripts/01\_deploy\_all.sh}}: script maestro directo e idempotente en 6 pasos (generación de los dos pares RSA-4096, arranque de \path{k8s_lab-calico-v02} junto al nodo VNX \texttt{terraform} mediante \path{k8s_lab-terraform.xml}, creación de subinterfaces \texttt{e2.1000} y demonio DHCP CNI en los \textit{workers}, despliegue del escenario complementario LXC en VNX, sincronización en \texttt{/shared} + ejecución de \texttt{terraform init/validate/apply} e instalación de \texttt{mariadb-client} sobre la VLAN).
+  \item \textbf{\texttt{scripts/02\_verify\_all.sh}} y \textbf{\texttt{scripts/03\_destroy\_all.sh}}: suite automatizada de auditoría funcional/seguridad (incluyendo \texttt{terraform state list} y \texttt{terraform output}) y desmontaje ordenado del escenario.
+  \item \textbf{\texttt{vnx/k8s\_lxc\_vlan.xml}} y \textbf{\texttt{vnx/conf/}}: definición VNX 2.0 de los contenedores LXC \texttt{bbdd} y \texttt{logs} conectada a \texttt{VlanNet} (inspirada en la plantilla base \path{k8s_lab-vms-vlan.xml} del laboratorio) junto con los ficheros inyectados mediante \texttt{<filetree>} y \texttt{<exec>}.
+  \item \textbf{\texttt{terraform/*.tf}} y \textbf{\texttt{terraform.tfvars}}: módulos HCL (\path{k8s-provider.tf}, \path{variables.tf}, \path{terraform.tfvars}, \path{locals.tf}, \path{secrets.tf}, \path{multus.tf}, \path{configmap.tf}, \path{web.tf}, \path{admin.tf}, \path{services_ingress.tf}, \path{network_policies.tf} y \path{outputs.tf}) validados contra la versión exacta \texttt{2.23.0} del proveedor oficial \path{hashicorp/kubernetes} empleada en la Práctica 1.4.
+\end{itemize}

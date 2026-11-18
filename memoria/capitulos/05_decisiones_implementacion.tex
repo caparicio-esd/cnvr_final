@@ -1,0 +1,106 @@
+\chapter{Decisiones de Ingeniería y Resultados (\textit{Decisions \& Outcomes})}
+
+Este capítulo documenta de forma razonada los seis problemas reales de integración entre Linux, VNX, Kubernetes y Terraform encontrados al diseñar el escenario, las opciones evaluadas y el resultado técnico (\textit{outcome}) de cada decisión adoptada.
+
+\section{Decisión 1: Asignación de IPs en Multus para un \texttt{Deployment} Escalable}
+
+\begin{decisionbox}{Problema: Colisión de IPs en Capa 2 al escalar réplicas con Multus}
+En la Práctica 3.1 (\texttt{13\_multus.sh}), cada Pod se definía en un fichero individual (\texttt{vma3.yml}, \texttt{vma4.yml}) con una anotación \texttt{ips: ["10.1.2.200/24"]} bajo \texttt{ipam: static}. Sin embargo, en el Trabajo Final los tres servidores web pertenecen a un único objeto \textbf{\texttt{Deployment}}, donde todas las réplicas comparten exactamente la misma plantilla (\texttt{spec.template}).
+\begin{itemize}
+  \item Si se fija una IP estática en la plantilla, las 3 réplicas arrancan con la \emph{misma IP} en la VLAN \texttt{1000}, causando conflicto ARP inmediato.
+  \item Si se utiliza el plugin \texttt{host-local} con un mismo rango en la \texttt{NetworkAttachmentDefinition}, como su base de datos reside localmente en el disco de cada nodo (\texttt{/var/lib/cni/networks}), \texttt{k8s-worker1} asignaría \texttt{10.1.2.50} a su primer Pod y \texttt{k8s-worker2} asignaría \emph{también} \texttt{10.1.2.50} al suyo.
+\end{itemize}
+\end{decisionbox}
+
+\textbf{Solución de ingeniería implementada:}
+Se desacopla la política IPAM en dos definiciones \texttt{NetworkAttachmentDefinition} complementarias (\texttt{multus.tf}):
+\begin{enumerate}
+  \item \textbf{\texttt{vlan1000-static}} para el Pod único \texttt{admin}, fijando su dirección conocida en \texttt{10.1.2.10/24}.
+  \item \textbf{\texttt{vlan1000-dhcp}} para el \texttt{Deployment} web: en \texttt{01\_deploy\_all.sh} se activa el demonio oficial \texttt{/opt/cni/bin/dhcp daemon} (\texttt{/run/cni/dhcp.sock}) en ambos nodos \textit{worker}, mientras que el contenedor LXC \texttt{logs} (\texttt{10.1.2.101}) ejecuta \textbf{\texttt{dnsmasq}} sobre \texttt{eth1} repartiendo concesiones únicas del rango \texttt{10.1.2.50--10.1.2.95}. Crucialmente, en \texttt{vnx/conf/dnsmasq/vlan1000-dhcp.conf} se configura \texttt{port=0}, \texttt{dhcp-option=3} (vacío) y \texttt{dhcp-option=6} (vacío) para que el servidor DHCP entregue \textbf{únicamente la dirección IP \texttt{/24} de enlace}, sin inyectar una segunda puerta de enlace por defecto que sobreescriba la ruta primaria de Calico en \texttt{eth0} ni alterar \texttt{/etc/resolv.conf} (CoreDNS).
+\end{enumerate}
+
+\begin{outcomebox}{Resultado (\textit{Outcome})}
+Cualquier operación \texttt{terraform apply -var="web\_replicas=N"} (con $N = 3, 5, 10\dots$) asigna direcciones IP únicas y libres de colisiones en toda la VLAN \texttt{1000} con independencia del nodo \textit{worker} elegido por el \texttt{kube-scheduler}, manteniendo intacto el encaminamiento primario de Kubernetes.
+\end{outcomebox}
+
+\section{Decisión 2: \texttt{Secrets}, \texttt{fsGroup: 1000} y \texttt{StrictModes} de OpenSSH}
+
+\begin{decisionbox}{Problema: Rechazo de claves privadas \texttt{0440} por el cliente OpenSSH}
+El enunciado propone montar los recursos \texttt{Secret} con \texttt{defaultMode: 0440} y \texttt{securityContext.fsGroup: 1000} para que \texttt{adminuser} (\texttt{UID=1000, GID=1000}) pueda leer el archivo montado (propiedad \texttt{root:1000}, permisos \texttt{-r--r-----}). No obstante, al inspeccionar el código fuente de OpenSSH (\texttt{sshkey\_perm\_ok}), el cliente \texttt{ssh} comprueba estrictamente que \texttt{(st\_uid == uid) \&\& ((st\_mode \& 077) == 0)}. Si un usuario no-root invoca \texttt{ssh -i} contra un fichero propiedad de \texttt{root} o con bits de grupo activos (\texttt{0440 \& 077 = 040 $\neq$ 0}), OpenSSH aborta la conexión con \texttt{WARNING: UNPROTECTED PRIVATE KEY FILE! Permissions 0440 are too open}.
+\end{decisionbox}
+
+\textbf{Solución de ingeniería implementada:}
+\begin{itemize}
+  \item Se generan en el host dos pares RSA de 4096 bits completamente independientes: \textbf{Par 1} (\texttt{keys/id\_rsa\_internal}, administración interna) y \textbf{Par 2} (\texttt{keys/id\_rsa\_external}, acceso exterior al bastión).
+  \item En \texttt{terraform/secrets.tf} se declaran \textbf{tres objetos \texttt{kubernetes\_secret\_v1} separados}: \texttt{admin-ssh-privkey} (clave privada Par 1), \texttt{admin-ssh-authkeys} (clave pública Par 2) y \texttt{web-ssh-authkeys} (clave pública Par 1), montados todos ellos con \texttt{mode = "0440"} y \texttt{fs\_group = 1000}.
+  \item En \path{admin.tf} y \path{web.tf} se añade un \texttt{initContainer} ejecutado explícitamente sin privilegios (\path{run_as_user = 1000}, \path{run_as_group = 1000}). Este contenedor \emph{depende} de \path{fsGroup: 1000} y del modo \texttt{0440} para poder leer los \texttt{Secrets} montados en \path{/mnt/ssh-*}, y copia las claves a un volumen \texttt{emptyDir} montado en \path{/home/adminuser/.ssh} (y \path{/home/webuser/.ssh}) aplicando directorio \texttt{0700} y ficheros \texttt{0600} propiedad de \texttt{1000:1000}. Adicionalmente, los volúmenes \texttt{Secret} originales permanecen montados en \path{/etc/ssh-secrets/} para su inspección directa.
+\end{itemize}
+
+\begin{outcomebox}{Resultado (\textit{Outcome})}
+Se cumple al 100\,\% el diseño de \texttt{Secrets} + \texttt{fsGroup: 1000} + \texttt{0440} en Kubernetes y, simultáneamente, tanto el demonio \texttt{sshd} (\texttt{StrictModes yes}) como el cliente \texttt{ssh} autentican de forma inmediata y transparente sin contraseñas ni errores de permisos.
+\end{outcomebox}
+
+\section{Decisión 3: Inspección de Imágenes OCI y Renderizado HTML Dinámico}
+
+Al inspeccionar los manifiestos OCI de \path{dgsgiros/nginx-ssh:latest} y \path{dgsgiros/admin-ssh:latest}, se verificó que:
+\begin{itemize}
+  \item \path{dgsgiros/nginx-ssh:latest} extiende la imagen oficial \texttt{nginx:1.31.8} sobre Debian Trixie, sirviendo contenido desde \textbf{\path{/usr/share/nginx/html}}, con un \path{/entrypoint.sh} que ejecuta \texttt{ssh-keygen -A}, lanza \path{/usr/sbin/sshd} en segundo plano y transfiere el PID 1 a \texttt{nginx -g 'daemon off;'}.
+  \item Reutilizar esa misma imagen \texttt{dgsgiros/nginx-ssh:latest} en los \texttt{initContainers} de \texttt{web.tf} evita descargar imágenes extra (\texttt{busybox}/\texttt{alpine}) desde Docker Hub, acelerando el arranque de cada réplica y reduciendo dependencias de red.
+\end{itemize}
+
+\begin{lstlisting}[language=HCL,caption={Fragmento del \texttt{initContainer} (Opción B) en \texttt{terraform/web.tf} con \textit{Downward API}.}]
+init_container {
+  name  = "generate-html"
+  image = "dgsgiros/nginx-ssh:latest"
+  env {
+    name = "POD_NAME"
+    value_from { field_ref { field_path = "metadata.name" } }
+  }
+  command = ["/bin/sh", "-c", <<-EOT
+    sed -e "s/__POD_NAME__/$${POD_NAME}/g" \
+        -e "s/__GROUP_NUMBER__/$${GROUP_NUMBER}/g" \
+        /mnt/html-template/index.html > /usr/share/nginx/html/index.html
+  EOT
+  ]
+  volume_mount { name = "html-template-vol", mount_path = "/mnt/html-template", read_only = true }
+  volume_mount { name = "html-shared-vol",   mount_path = "/usr/share/nginx/html" }
+}
+\end{lstlisting}
+
+\begin{outcomebox}{Resultado (\textit{Outcome})}
+Cada Pod sirve desde el primer milisegundo en que su \texttt{readinessProbe} pasa a \texttt{True} una tarjeta HTML personalizada con su nombre exacto de Pod (\texttt{web-deployment-<rs-hash>-<pod-id>}), el nodo \textit{worker} que lo ejecuta, su IP primaria en Calico y la ruta \texttt{/servers-G11}.
+\end{outcomebox}
+
+\section{Decisión 4: Preservación de IP Origen en \texttt{NodePort} para \texttt{ipBlock}}
+
+\begin{decisionbox}{Problema: El SNAT por defecto de \texttt{kube-proxy} anula la \texttt{NetworkPolicy} de SSH}
+El Apartado 5.3 exige permitir SSH al Pod \texttt{admin} exclusivamente desde la IP del host autorizado en \texttt{user\_LAN} (\texttt{10.10.20.2/32}) usando \texttt{ipBlock}. Si \texttt{admin-service} mantuviese \texttt{externalTrafficPolicy: Cluster}, el paquete procedente de \texttt{10.10.20.2} hacia \texttt{10.10.10.11:30022} recibiría SNAT en \texttt{k8s-worker1} pasando a tener \texttt{SRC=10.10.10.11}, por lo que Calico lo descartaría al no coincidir con \texttt{10.10.20.2/32}.
+\end{decisionbox}
+
+\textbf{Solución y recorrido verificado del paquete:}
+En \texttt{admin.tf} se fija \path{node_selector = { "kubernetes.io/hostname" = "k8s-worker1" }} y en \path{services_ingress.tf} se configura \path{external_traffic_policy = "Local"} sobre \texttt{admin-service} (\texttt{port = 2222, target\_port = 22, node\_port = 30022}). El recorrido exacto del paquete es:
+\begin{enumerate}
+  \item El host emite \texttt{IP[SRC=10.10.20.2, DST=10.10.10.11] TCP[DPORT=30022]} hacia el router \texttt{r1} (\texttt{10.10.20.1}).
+  \item \texttt{r1} encamina sin NAT entre \texttt{user\_LAN} y \texttt{k8s\_LAN}, entregando el paquete a \texttt{e1} de \texttt{k8s-worker1} con \texttt{SRC=10.10.20.2}.
+  \item En \texttt{PREROUTING}, \texttt{kube-proxy} aplica DNAT local hacia \texttt{DST=PodAdminIP:22} \textbf{sin marcar \texttt{KUBE-MARK-MASQ}} (gracias a \texttt{Local}).
+  \item En \texttt{FORWARD} hacia la interfaz \texttt{cali*} del Pod \texttt{admin}, Calico evalúa \texttt{allow-ssh-to-admin}: comprueba \texttt{SRC=10.10.20.2 $\in$ 10.10.20.2/32} y \texttt{DPORT=22/TCP} $\rightarrow$ \textbf{\texttt{ACCEPT}}. Cualquier intento desde otra máquina (como \texttt{k8s-master} \texttt{10.10.10.10} o un nodo no autorizado) llega con su IP real y recibe \textbf{\texttt{DROP}}.
+\end{enumerate}
+
+\section{Decisión 5: Aprovisionamiento de Herramientas bajo Bloqueo \texttt{Egress}}
+
+\begin{decisionbox}{Problema: Instalación de \texttt{mariadb-client} cuando \texttt{default-deny-all} bloquea Internet}
+Las imágenes \texttt{dgsgiros/admin-ssh} y \texttt{dgsgiros/nginx-ssh} incluyen utilidades de red y \texttt{sudo apt}, pero no traen preinstalado el cliente \texttt{mariadb-client} necesario en el Apartado 2.7 para administrar la base de datos desde los Pods. Una vez aplicada la política \texttt{default-deny-all} (que bloquea todo \texttt{Egress} en \texttt{eth0}), cualquier \texttt{apt-get update} directo hacia Internet por \texttt{eth0} queda bloqueado, incluso si un Pod web se recrea posteriormente al escalar el \texttt{Deployment}.
+\end{decisionbox}
+
+\textbf{Solución de ingeniería implementada:}
+En el contenedor LXC \texttt{logs} (\texttt{10.1.2.101}) se despliega un proxy HTTP ligero (\textbf{\texttt{tinyproxy}} en el puerto \texttt{8888}, restringido mediante ACL \texttt{Allow 10.1.2.0/24}). De este modo, sin abrir ningún agujero en las \texttt{NetworkPolicies} de Kubernetes sobre \texttt{eth0}, tanto \texttt{01\_deploy\_all.sh} como el administrador pueden instalar paquetes en cualquier Pod canalizando \texttt{apt} por la interfaz secundaria \texttt{net1} (VLAN \texttt{1000}) hacia \texttt{10.1.2.101:8888}, saliendo a los repositorios oficiales de Ubuntu/Debian a través del enlace \texttt{eth9} (\texttt{virbr0}) del escenario VNX.
+
+\section{Decisión 6: Diseño del Escenario VNX LXC (\texttt{k8s\_lxc\_vlan.xml})}
+
+En \texttt{vnx/k8s\_lxc\_vlan.xml} se tuvieron en cuenta cuatro aspectos críticos de integración con VNX 2.0 y Linux:
+\begin{enumerate}
+  \item \textbf{\texttt{managed="no"} en \texttt{VlanNet} y \texttt{virbr0}}: impide que el ciclo de vida del escenario complementario intente recrear o destruir el switch Open vSwitch \texttt{VlanNet} que pertenece al escenario principal de Kubernetes.
+  \item \textbf{Desplazamiento de MACs y red privada de gestión (\texttt{automac offset="10"}, \texttt{offset="30"})}: evita colisiones de direcciones MAC en Capa 2 y de direcciones \texttt{10.250.0.x} en el host con las máquinas virtuales del clúster K8s.
+  \item \textbf{MariaDB escuchando en la VLAN (\texttt{bind-address = 0.0.0.0})}: en Ubuntu/Debian, el paquete \texttt{mariadb-server} escucha por defecto únicamente en \texttt{127.0.0.1}, rechazando con \texttt{Connection refused} cualquier cliente externo. Mediante \texttt{<filetree>} se inyecta \texttt{50-server.cnf} habilitando la escucha en red y \texttt{init\_db.sql} creando la base de datos \texttt{cnvr\_db} y el usuario administrador \texttt{'dbadmin'@'10.1.2.\%'} acotado criptográfica y topológicamente a la subred de la VLAN.
+  \item \textbf{Recepción centralizada Rsyslog (\texttt{10-remote-logs.conf})}: activa los módulos \texttt{imudp} e \texttt{imtcp} en el puerto \texttt{514} del contenedor \texttt{logs}, clasificando automáticamente los mensajes entrantes por IP de origen en \texttt{/var/log/remotos/<IP>/<programa>.log}.
+\end{enumerate}

@@ -1,0 +1,92 @@
+\chapter{Arquitectura y Recursos de Kubernetes en Profundidad}
+
+\section{Plano de Control, Nodos Worker y Evolución de CNI: Flannel vs Calico}
+
+El clúster de Kubernetes desplegado consta de un nodo de control (\texttt{k8s-master}, \texttt{10.10.10.10}) y dos nodos de ejecución (\texttt{k8s-worker1}, \texttt{10.10.10.11} y \texttt{k8s-worker2}, \texttt{10.10.10.12}), acompañados en \texttt{k8s\_LAN} por el nodo orquestador \texttt{terraform} (\texttt{10.10.10.13}):
+\begin{itemize}
+  \item \textbf{Plano de Control (\texttt{k8s-master})}: aloja \texttt{etcd} (almacén clave-valor consistente mediante consenso Raft donde persiste todo el estado del clúster, incluidos los \texttt{Secrets} y \texttt{NetworkPolicies}), \texttt{kube-apiserver} (único punto de entrada REST/JSON sobre TLS \texttt{:6443} con el que dialoga el proveedor de Terraform), \texttt{kube-scheduler} (encargado de ubicar los Pods evaluando restricciones como \texttt{nodeSelector}) y \texttt{kube-controller-manager} (ejecutor de los bucles de control de \texttt{Deployment}, \texttt{ReplicaSet} y \texttt{Endpoints}).
+  \item \textbf{Plano de Datos (\texttt{k8s-worker1/2})}: ejecuta el agente \texttt{kubelet}, el motor de contenedores \texttt{containerd} (estándar CRI), \texttt{kube-proxy} y los demonios de red CNI (\texttt{calico-node} y \texttt{multus}).
+\end{itemize}
+
+\subsection{Por qué Calico Sustituye a Flannel y Cómo Opera su Túnel IP-in-IP}
+
+En la Práctica 3.1 trabajamos sobre \textbf{Flannel}, mientras que tanto la Práctica 1.4 como el Trabajo Final emplean el escenario \path{k8s_lab-calico-v02} basado en \textbf{Calico}. La Tabla~\ref{tab:flannel-vs-calico} sintetiza las diferencias técnicas que motivan este cambio:
+
+\begin{table}[H]
+\centering
+\small
+\renewcommand{\arraystretch}{1.25}
+\begin{tabularx}{\textwidth}{l X X}
+\toprule
+\textbf{Característica} & \textbf{Flannel (Práctica 3.1)} & \textbf{Calico (Práctica 1.4 y Trabajo Final)} \\
+\midrule
+Conexión local en nodo & Par \texttt{veth} conectado a un switch L2 (\texttt{cni0}, \texttt{10.244.X.1/24}). & Enlace punto a punto L3 \texttt{cali*} con ruta \texttt{/32} por Pod y \textit{proxy ARP} (\texttt{169.254.1.1}). \\
+Transporte entre nodos & Túnel L2 sobre UDP: \textbf{VXLAN} (\texttt{flannel.1}, puerto UDP 8472, sobrecarga 50 bytes). & Enrutamiento L3 dinámico (\textbf{BGP} / BIRD) con encapsulación \textbf{IP-in-IP} (\texttt{tunl0}, protocolo IP 4, sobrecarga 20 bytes). \\
+Soporte \texttt{NetworkPolicy} & \textbf{Nulo}: ignora cualquier objeto \texttt{NetworkPolicy} creado en la API. & \textbf{Nativo completo}: el agente \textbf{Felix} compila las políticas en cadenas \texttt{iptables}/\texttt{ipset} de alto rendimiento. \\
+\bottomrule
+\end{tabularx}
+\caption{Comparativa técnica entre los plugins CNI Flannel y Calico en el laboratorio.}
+\label{tab:flannel-vs-calico}
+\end{table}
+
+En Calico ocurren dos mecanismos de red esenciales que conviene distinguir con precisión:
+\begin{enumerate}
+  \item \textbf{Encaminamiento intra-nodo mediante \textit{Proxy ARP}}: dentro de cada Pod, la tabla de rutas presenta una entrada de enlace local (\texttt{169.254.1.1 dev eth0 scope link}) y la puerta de enlace por defecto vía \texttt{169.254.1.1}. Ninguna interfaz posee realmente esa IP: el kernel del nodo \textit{worker} activa \texttt{proxy\_arp=1} sobre la interfaz \texttt{cali*} correspondiente, respondiendo con su propia dirección MAC a cualquier solicitud ARP del Pod y encaminando inmediatamente el datagrama IP en Capa 3 según la tabla FIB del nodo, previa inspección en las cadenas \texttt{cali-fw-*} (\textit{from-workload}) y \texttt{cali-tw-*} (\textit{to-workload}) programadas por Felix.
+  \item \textbf{Comunicación inter-nodo mediante túneles IP-in-IP (\texttt{tunl0})}: tal como se estudia en la Práctica 1.4 (Apdo.~3.3.1), cuando un Pod alojado en \texttt{k8s-worker1} envía un paquete por \texttt{eth0} a otro Pod alojado en \texttt{k8s-worker2} (p.\,ej., el Pod del controlador \texttt{ingress-nginx} alcanzando una réplica web remota), el demonio BGP (\texttt{BIRD}) de cada nodo anuncia su bloque CIDR local (\texttt{/26}) apuntando a la interfaz de túnel \textbf{\texttt{tunl0}}. El kernel encapsula el paquete IP original (\texttt{IP\_interna[SRC=PodA, DST=PodB]}) directamente como carga útil de un nuevo paquete IPv4 externo (\texttt{IP\_externa[SRC=10.10.10.11, DST=10.10.10.12, Protocol=4 (IPIP)]}) a través de \texttt{e1} (\texttt{k8s\_LAN}), ajustando la MTU de \texttt{eth0} en los Pods a \texttt{1480} bytes ($1500 - 20$ bytes de cabecera IPv4 exterior). Al capturar con Wireshark o \texttt{tcpdump} sobre \texttt{e1}, se observan limpiamente ambas cabeceras IP anidadas.
+\end{enumerate}
+
+\section{Meta-Plugin Multus y \texttt{NetworkAttachmentDefinition}}
+
+La especificación CNI estándar invoca un único binario al crear el \texttt{netns} de un Pod. \textbf{Multus CNI} actúa como un \textit{meta-plugin} (un multiplexor CNI): es el primer binario que invoca \texttt{containerd} al leer \texttt{/etc/cni/net.d/00-multus.conf}. Su flujo de ejecución consta de dos pasos:
+\begin{enumerate}
+  \item Invoca siempre al \textbf{CNI primario} del clúster (\textbf{Calico}) para configurar \texttt{eth0}, la ruta por defecto del Pod y su registro en Kubernetes.
+  \item Inspecciona las anotaciones (\path{metadata.annotations}) del Pod buscando la clave \path{k8s.v1.cni.cncf.io/networks}. Por cada entrada listada, consulta en el API Server el objeto CRD (\textit{Custom Resource Definition}) de tipo \path{NetworkAttachmentDefinition} correspondiente e invoca al plugin CNI secundario definido en su JSON (en nuestro caso, \texttt{macvlan} sobre \texttt{e2.1000}), inyectando la interfaz \texttt{net1} dentro del mismo \texttt{netns}.
+\end{enumerate}
+
+\section{Gestión de Cargas, Volúmenes, \texttt{ConfigMaps} y \texttt{Secrets}}
+
+\subsection{\texttt{Deployment} frente a \texttt{Pod} Individual}
+
+En nuestra arquitectura se emplean deliberadamente ambos niveles de abstracción según la naturaleza de cada componente:
+\begin{itemize}
+  \item \textbf{\texttt{Deployment} para los servidores web (\texttt{web-deployment})}: al tratarse de instancias sin estado propio (\textit{stateless}), un \texttt{Deployment} gestiona un \texttt{ReplicaSet} que mantiene de forma continua 3 réplicas activas (escalables en caliente cambiando \texttt{var.web\_replicas}). Si un Pod muere o un nodo cae, el controlador instancia otro Pod nuevo de forma autónoma (\textit{self-healing}).
+  \item \textbf{\texttt{Pod} directo para el servidor \texttt{admin}}: al actuar como bastión único de gestión con IP fija (\texttt{10.1.2.10}) en la VLAN y anclado a \texttt{k8s-worker1} (\texttt{nodeSelector}) para recibir el tráfico SSH externo sin SNAT, se instancia como un recurso \texttt{Pod} individual controlado directamente por el estado de Terraform.
+\end{itemize}
+
+\subsection{Comparativa de Patrones: \texttt{initContainer} (Opción B) vs \texttt{sidecar} (Opción A)}
+
+El Apartado 3 plantea personalizar el archivo \texttt{index.html} de cada réplica Nginx sustituyendo un marcador de plantilla por el nombre real del Pod. Evaluamos ambas arquitecturas:
+\begin{itemize}
+  \item \textbf{Opción A --- Contenedor auxiliar (\textit{sidecar})}: corre en paralelo junto a Nginx durante toda la vida del Pod. Resulta idóneo cuando el contenido cambia periódicamente (p.\,ej., sincronizando un repositorio Git cada 30 segundos), pero introduce dos inconvenientes para datos estáticos del Pod: mantiene un proceso extra consumiendo memoria/PIDs permanentemente, y genera una \emph{condición de carrera} durante el primer segundo de arranque en la que Nginx podría atender una petición antes de que el \textit{sidecar} haya terminado de escribir \texttt{index.html}.
+  \item \textbf{Opción B --- \texttt{initContainer} (Solución elegida)}: los \texttt{initContainers} se ejecutan secuencialmente hasta finalizar con código \texttt{0} \emph{antes} de que el \texttt{kubelet} inicie los contenedores principales de aplicación. Dado que \texttt{metadata.name}, \texttt{spec.nodeName} y \texttt{status.podIP} son constantes durante la vida del Pod (expuestos de forma nativa mediante variables de entorno de la \textbf{\textit{Downward API}}), el \texttt{initContainer} \texttt{generate-html} lee la plantilla desde el volumen \texttt{ConfigMap} (montado como solo lectura en \texttt{/mnt/html-template}), ejecuta \texttt{sed}, deposita el \texttt{index.html} resultante en el volumen \texttt{emptyDir} compartido (\texttt{/usr/share/nginx/html}) y termina limpiamente liberando el 100\,\% de sus recursos antes de que arranque Nginx.
+\end{itemize}
+
+\subsection{Montaje Seguro de \texttt{Secrets} y Propiedad \texttt{fsGroup}}
+
+Un \texttt{Secret} de Kubernetes montado como volumen utiliza un sistema de ficheros temporal en RAM (\texttt{tmpfs}) para evitar que las claves toquen el disco físico del nodo \textit{worker}. Por defecto, \texttt{kubelet} crea los ficheros del volumen con propietario \texttt{root:root} (\texttt{0:0}) y permisos \texttt{0644}. Al especificar en el Pod:
+\begin{lstlisting}[language=YAML]
+spec:
+  securityContext:
+    fsGroup: 1000
+  volumes:
+    - name: ssh-private-key
+      secret:
+        secretName: admin-ssh-privkey
+        defaultMode: 0440
+\end{lstlisting}
+Kubernetes asigna la propiedad de grupo \texttt{GID=1000} (\texttt{adminuser}/\texttt{webuser}) a los puntos de montaje y aplica la máscara octal \texttt{0440} (\texttt{-r--r-----}, propietario \texttt{root}, grupo \texttt{1000}), permitiendo que el usuario sin privilegios de cada contenedor lea el secreto de manera segura a través de sus permisos de grupo, sin exponerlo a otros usuarios (\textit{others = 0}).
+
+\section{Servicios, MetalLB, Ingress NGINX y Modelo Stateful de \texttt{NetworkPolicy}}
+
+La publicación y protección de los servicios combina tres capas sucesivas:
+\begin{enumerate}
+  \item \textbf{MetalLB (Capa 2 / ARP)}: en ausencia de un balanceador de proveedor cloud (AWS ELB, GCP LB), el demonio \texttt{speaker} de MetalLB anuncia mediante respuestas ARP gratuitas en \texttt{k8s\_LAN} (\texttt{e1}) la IP externa \texttt{10.10.10.20} asignada al servicio \texttt{LoadBalancer} del controlador \texttt{ingress-nginx}.
+  \item \textbf{Ingress NGINX (Capa 7 HTTP)}: un único punto de entrada (\texttt{10.10.10.20:80}) inspecciona la URL HTTP entrante. Cuando coincide con el prefijo \texttt{/servers-G11}, la anotación \texttt{nginx.ingress.kubernetes.io/rewrite-target: "/"} reescribe la ruta URI a \texttt{"/"} (pues Nginx en los Pods sirve su raíz \texttt{/usr/share/nginx/html/index.html}) y encamina la petición hacia los \textit{Endpoints} de \texttt{web-service} (\texttt{ClusterIP:8080 $\rightarrow$ PodIP:80}).
+  \item \textbf{Modelo aditivo y \textit{stateful} de \texttt{NetworkPolicy} (Práctica 1.4, Apdo.~3.3)}: en Kubernetes, si ninguna política selecciona a un Pod, todo su tráfico está permitido (\textit{default allow}). Al aplicar nuestra primera política \texttt{default-deny-all} (\texttt{podSelector: \{\}} con \texttt{policyTypes: ["Ingress", "Egress"]} y sin reglas \texttt{ingress}/\texttt{egress}), todo el tráfico entrante y saliente en el namespace \texttt{default} queda denegado salvo lo permitido explícitamente por otras políticas (modelo aditivo o \textit{whitelist}).
+
+  Tal como demuestra el estudio experimental de la Práctica 1.4 (Apdo.~3.3.3), Calico evalúa las políticas de manera \textbf{con estado (\textit{stateful})} apoyándose en \texttt{conntrack}: distingue quién \emph{inicia} la conexión (\texttt{TCP SYN}) del tráfico de \emph{respuesta}. Cuando una comunicación ocurre entre dos Pods sujetos ambos a \texttt{default-deny-all} dentro del mismo namespace (como el Pod \texttt{tester} y los Pods \texttt{nginx} en la Práctica 1.4), es obligatorio definir \textbf{tanto} una regla \texttt{Egress} en el Pod emisor \textbf{como} una regla \texttt{Ingress} en el Pod receptor para autorizar el \texttt{SYN} inicial, mientras que los paquetes de respuesta regresan automáticamente sin reglas inversas. En cambio, en nuestro Trabajo Final, tanto el controlador \texttt{ingress-nginx} (que reside en su propio namespace \texttt{ingress-nginx}, no afectado por \texttt{default-deny-all}) como el host SSH exterior (\texttt{10.10.20.2}) se encuentran \emph{fuera} del namespace \texttt{default}: por ello, basta definir únicamente reglas \texttt{Ingress} (\texttt{allow-ingress-to-web} y \texttt{allow-ssh-to-admin}) en nuestros Pods sin abrir ninguna regla \texttt{Egress} en \texttt{eth0}, ya que todo el tráfico HTTP y SSH de vuelta fluye autorizado por el seguimiento de estado de la conexión entrante.
+\end{enumerate}
+
+\begin{warnbox}{Semántica Booleana AND vs OR en \texttt{NetworkPolicy}}
+En la política \texttt{allow-ingress-to-web}, colocar \texttt{namespaceSelector} y \texttt{podSelector} dentro de \textbf{un mismo bloque \texttt{from}} impone una condición \textbf{AND lógica} (únicamente los Pods con etiquetas de \texttt{ingress-nginx} que residan dentro del namespace \texttt{ingress-nginx}). Si se declarasen como dos bloques \texttt{from} separados, Kubernetes aplicaría un \textbf{OR lógico}, abriendo una brecha de seguridad que permitiría el acceso desde cualquier Pod del namespace \texttt{ingress-nginx} o desde cualquier Pod del namespace \texttt{default} que falsificase esas etiquetas.
+\end{warnbox}

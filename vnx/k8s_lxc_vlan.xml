@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!--
+================================================================================
+ Trabajo Final CNVR / ARSN (Curso 2026-27) - Grupo 11
+ Escenario VNX complementario con contenedores LXC conectados a VlanNet (VLAN 1000):
+   - bbdd (10.1.2.100/24): Servidor de Base de Datos MariaDB + OpenSSH
+   - logs (10.1.2.101/24): Servidor centralizado de Logs (rsyslog) + DHCP VLAN + OpenSSH
+ Autor: Carlos Aparicio de Santiago
+================================================================================
+-->
+
+<vnx xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+     xsi:noNamespaceSchemaLocation="/usr/share/xml/vnx/vnx-2.00.xsd">
+
+  <global>
+    <version>2.0</version>
+    <scenario_name>cnvr_final_lxc_vlan</scenario_name>
+    <!-- Offset de MAC y red de gestion privada distintos del escenario K8s principal -->
+    <automac offset="10"/>
+    <vm_mgmt type="private" network="10.250.0.0" mask="24" offset="30">
+      <host_mapping />
+    </vm_mgmt>
+    <vm_defaults>
+      <console id="0" display="no"/>
+      <console id="1" display="no"/>
+    </vm_defaults>
+  </global>
+
+  <!-- Redes preexistentes creadas por el escenario de Kubernetes y libvirt (managed="no") -->
+  <net name="VlanNet" mode="openvswitch" managed="no"/>
+  <net name="virbr0"  mode="virtual_bridge" managed="no"/>
+
+  <!-- =====================================================================
+       CONTENEDOR LXC 1: SERVIDOR DE BASE DE DATOS (bbdd)
+       ===================================================================== -->
+  <vm name="bbdd" type="lxc" arch="x86_64">
+    <filesystem type="cow">/usr/share/vnx/filesystems/rootfs_lxc_ubuntu64</filesystem>
+
+    <if id="1" net="VlanNet">
+      <vlan>
+        <tag id="1000"/>
+      </vlan>
+      <ipv4>10.1.2.100/24</ipv4>
+    </if>
+    <if id="9" net="virbr0">
+      <ipv4>dhcp</ipv4>
+    </if>
+
+    <!-- Copia de clave publica SSH autorizada (Par 1: admin -> infra) y ficheros MariaDB -->
+    <filetree seq="on_boot" root="/root/.ssh/">conf/ssh/authorized_keys</filetree>
+    <filetree seq="setup"   root="/root/mariadb/">conf/mariadb/50-server.cnf</filetree>
+    <filetree seq="setup"   root="/root/mariadb/">conf/mariadb/init_db.sql</filetree>
+
+    <exec seq="on_boot" type="verbatim">
+      mkdir -p /root/.ssh
+      chown -R root:root /root/.ssh
+      chmod 700 /root/.ssh
+      chmod 600 /root/.ssh/authorized_keys
+      dhclient eth9 || true
+    </exec>
+
+    <exec seq="setup" type="verbatim">
+      export DEBIAN_FRONTEND=noninteractive
+      dhclient eth9 || true
+      apt-get update
+      apt-get install -y openssh-server mariadb-server mariadb-client iproute2 iputils-ping net-tools
+
+      # Crear tambien usuario 'adminuser' (UID 1000) con sudo y la misma clave publica SSH
+      id -u adminuser >/dev/null 2>&amp;1 || (groupadd -g 1000 adminuser &amp;&amp; useradd -m -u 1000 -g 1000 -s /bin/bash adminuser)
+      echo 'adminuser ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/adminuser
+      chmod 0440 /etc/sudoers.d/adminuser
+      mkdir -p /home/adminuser/.ssh
+      cp /root/.ssh/authorized_keys /home/adminuser/.ssh/authorized_keys
+      chown -R adminuser:adminuser /home/adminuser/.ssh
+      chmod 700 /home/adminuser/.ssh
+      chmod 600 /home/adminuser/.ssh/authorized_keys
+
+      # Configurar OpenSSH solo mediante clave publica (sin contrasena)
+      mkdir -p /run/sshd
+      sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+      sed -i 's/^#\?PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
+      sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
+      systemctl enable ssh || true
+      systemctl restart ssh || service ssh restart
+
+      # Configurar y arrancar MariaDB escuchando en la interfaz VLAN (10.1.2.100:3306)
+      cp /root/mariadb/50-server.cnf /etc/mysql/mariadb.conf.d/50-server.cnf
+      systemctl enable mariadb || true
+      systemctl restart mariadb || service mariadb restart
+      mariadb &lt; /root/mariadb/init_db.sql
+    </exec>
+  </vm>
+
+  <!-- =====================================================================
+       CONTENEDOR LXC 2: SERVIDOR DE LOGS + DHCP VLAN (logs)
+       ===================================================================== -->
+  <vm name="logs" type="lxc" arch="x86_64">
+    <filesystem type="cow">/usr/share/vnx/filesystems/rootfs_lxc_ubuntu64</filesystem>
+
+    <if id="1" net="VlanNet">
+      <vlan>
+        <tag id="1000"/>
+      </vlan>
+      <ipv4>10.1.2.101/24</ipv4>
+    </if>
+    <if id="9" net="virbr0">
+      <ipv4>dhcp</ipv4>
+    </if>
+
+    <!-- Copia de clave publica SSH autorizada y configuraciones de rsyslog y dnsmasq -->
+    <filetree seq="on_boot" root="/root/.ssh/">conf/ssh/authorized_keys</filetree>
+    <filetree seq="setup"   root="/etc/rsyslog.d/">conf/rsyslog/10-remote-logs.conf</filetree>
+    <filetree seq="setup"   root="/etc/dnsmasq.d/">conf/dnsmasq/vlan1000-dhcp.conf</filetree>
+
+    <exec seq="on_boot" type="verbatim">
+      mkdir -p /root/.ssh
+      chown -R root:root /root/.ssh
+      chmod 700 /root/.ssh
+      chmod 600 /root/.ssh/authorized_keys
+      dhclient eth9 || true
+    </exec>
+
+    <exec seq="setup" type="verbatim">
+      export DEBIAN_FRONTEND=noninteractive
+      dhclient eth9 || true
+      apt-get update
+      apt-get install -y openssh-server rsyslog dnsmasq tinyproxy iproute2 iputils-ping net-tools
+
+      # Crear usuario 'adminuser' (UID 1000) con sudo y clave publica autorizada
+      id -u adminuser >/dev/null 2>&amp;1 || (groupadd -g 1000 adminuser &amp;&amp; useradd -m -u 1000 -g 1000 -s /bin/bash adminuser)
+      echo 'adminuser ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/adminuser
+      chmod 0440 /etc/sudoers.d/adminuser
+      mkdir -p /home/adminuser/.ssh
+      cp /root/.ssh/authorized_keys /home/adminuser/.ssh/authorized_keys
+      chown -R adminuser:adminuser /home/adminuser/.ssh
+      chmod 700 /home/adminuser/.ssh
+      chmod 600 /home/adminuser/.ssh/authorized_keys
+
+      # Configurar OpenSSH solo por clave publica
+      mkdir -p /run/sshd
+      sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+      sed -i 's/^#\?PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
+      sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
+      systemctl enable ssh || true
+      systemctl restart ssh || service ssh restart
+
+      # Configurar rsyslog para almacenar logs remotos de la VLAN
+      mkdir -p /var/log/remotos
+      chown syslog:adm /var/log/remotos 2>/dev/null || true
+      systemctl enable rsyslog || true
+      systemctl restart rsyslog || service rsyslog restart
+
+      # Activar DHCP en eth1 (VLAN 1000) para escalabilidad horizontal de Pods web con Multus
+      systemctl enable dnsmasq || true
+      systemctl restart dnsmasq || service dnsmasq restart
+
+      # Configurar tinyproxy en 10.1.2.101:8888 (permite instalar paquetes apt desde la VLAN
+      # incluso cuando la NetworkPolicy default-deny bloquea Egress en eth0)
+      grep -q "Allow 10.1.2.0/24" /etc/tinyproxy/tinyproxy.conf || echo "Allow 10.1.2.0/24" >> /etc/tinyproxy/tinyproxy.conf
+      sed -i 's/^Listen.*/#Listen/' /etc/tinyproxy/tinyproxy.conf
+      systemctl enable tinyproxy || true
+      systemctl restart tinyproxy || service tinyproxy restart
+    </exec>
+  </vm>
+
+</vnx>

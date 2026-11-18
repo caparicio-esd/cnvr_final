@@ -1,0 +1,108 @@
+\chapter{Verificación Experimental, Pruebas y Conclusiones}
+
+\section{Flujo Automatizado de Despliegue (\texttt{01\_deploy\_all.sh})}
+
+Todo el proceso de puesta en marcha se condensa en un único comando ejecutable desde el host del laboratorio:
+\begin{lstlisting}[language=bash]
+chmod +x scripts/*.sh
+./scripts/01_deploy_all.sh
+\end{lstlisting}
+
+El script ejecuta de forma secuencial y limpia (\texttt{set -euo pipefail}) los seis pasos del escenario sobre el entorno del laboratorio:
+\begin{enumerate}
+  \item Generación de \texttt{keys/id\_rsa\_internal} (Par 1) y \texttt{keys/id\_rsa\_external} (Par 2) y copia de la clave pública interna hacia \texttt{vnx/conf/ssh/authorized\_keys}.
+  \item Arranque del clúster Kubernetes con Calico (\path{/lab/cnvr/bin/get-k8s-calico} $\rightarrow$ \path{./bin/start-k8s-calico}), carga de credenciales con \path{./bin/get-master-kubeconf}, despliegue del nodo proveedor \textbf{\texttt{terraform}} (\texttt{sudo vnx -f} \path{k8s_lab-terraform.xml} \texttt{--create} y \texttt{-x install-terraform}) y exportación de su kubeconfig con \path{./bin/set-terraform-kubeconf}.
+  \item Creación de la subinterfaz \texttt{e2.1000} y arranque del demonio CNI \texttt{dhcp} (\path{/run/cni/dhcp.sock}) en \texttt{k8s-worker1} y \texttt{k8s-worker2}.
+  \item Despliegue del escenario complementario VNX (\texttt{sudo vnx -f k8s\_lxc\_vlan.xml -v --create} y \texttt{-x setup}) para aprovisionar OpenSSH, MariaDB, Rsyslog, Dnsmasq y Tinyproxy en \texttt{bbdd} y \texttt{logs}.
+  \item Sincronización de \texttt{terraform/*.tf}, \texttt{terraform.tfvars} y \texttt{keys/} en \texttt{/shared/cnvr\_final/} y ejecución remota en el nodo \texttt{terraform} de \texttt{terraform init}, \texttt{terraform validate} y \texttt{terraform apply -auto-approve}, respaldando el fichero de estado.
+  \item Instalación de \texttt{mariadb-client} en el Pod \texttt{admin} y en las réplicas web empleando el proxy interno de la VLAN (\texttt{10.1.2.101:8888}), mostrando finalmente \texttt{terraform output}.
+\end{enumerate}
+
+\section{Protocolo de Verificación Integral (\texttt{02\_verify\_all.sh})}
+
+El script \texttt{scripts/02\_verify\_all.sh} automatiza las seis baterías de pruebas exigidas por el enunciado, verificando tanto el funcionamiento esperado (pruebas positivas) como el bloqueo efectivo de accesos prohibidos (pruebas negativas).
+
+\subsection{Verificación de Interfaces Multus y Etiquetado 802.1Q en la VLAN}
+
+Al inspeccionar las interfaces dentro del Pod \texttt{admin} y de las tres réplicas de \texttt{web-deployment} mediante \texttt{kubectl exec <pod> -- ip -4 addr}, se comprueba la presencia simultánea de:
+\begin{itemize}
+  \item \textbf{\texttt{eth0}}: dirección del pool CNI de Calico para el tráfico interno del clúster.
+  \item \textbf{\texttt{net1}}: interfaz \texttt{macvlan} en la subred \texttt{10.1.2.0/24} (\texttt{10.1.2.10/24} estática en \texttt{admin}, y concesiones DHCP \texttt{10.1.2.50/24}, \texttt{.51/24}, \texttt{.52/24} en los Pods web).
+\end{itemize}
+
+Al capturar tráfico con \texttt{tcpdump -i e2 -n -e icmp} en \texttt{k8s-worker1} durante los pings hacia \texttt{10.1.2.100} (\texttt{bbdd}) y \texttt{10.1.2.101} (\texttt{logs}), se observa que las tramas abandonan el nodo \textit{worker} directamente con la dirección MAC propia de la subinterfaz \texttt{macvlan} del Pod y encapsuladas con cabecera \textbf{IEEE 802.1Q (\texttt{ethertype 0x8100, vlan 1000})}, sin sobrecarga de cabeceras VXLAN ni IPIP, y con \texttt{TTL=64} tanto en la ida como en la vuelta al encontrarse todos los elementos en el mismo dominio de difusión L2.
+
+\subsection{Verificación de Acceso SSH Cruzado mediante Pares de Claves}
+
+\begin{enumerate}
+  \item \textbf{Desde el Host (\texttt{user\_LAN}) al Pod \texttt{admin} (Par 2)}:
+\begin{lstlisting}[language=bash]
+ssh -i keys/id_rsa_external -p 30022 adminuser@10.10.10.11
+\end{lstlisting}
+  El acceso se completa sin solicitar contraseña a través del \texttt{NodePort} de \texttt{k8s-worker1}, autenticando contra el volumen montado desde el \texttt{Secret} \texttt{admin-ssh-authkeys}.
+  \item \textbf{Desde el Pod \texttt{admin} hacia los Pods Web y Contenedores LXC (Par 1)}:
+  Una vez dentro de \texttt{admin} como \texttt{adminuser}, las conexiones \texttt{ssh} hacia \path{webuser@10.1.2.5X}, \path{adminuser@10.1.2.100} (\texttt{bbdd}) y \path{adminuser@10.1.2.101} (\texttt{logs}) se establecen sin contraseña empleando la clave privada \texttt{\textasciitilde/.ssh/id\_rsa} inyectada por \texttt{admin-ssh-privkey}. Asimismo, cualquier intento de inicio de sesión por contraseña es rechazado por \texttt{sshd} (\texttt{PasswordAuthentication no}).
+\end{enumerate}
+
+\subsection{Administración de Base de Datos MariaDB y Recepción de Logs}
+
+Desde el Pod \texttt{admin} y desde cualquiera de los Pods de servidores web se verifica la administración completa (lectura, inserción de registros y gestión de esquemas) sobre el servidor MariaDB en \texttt{bbdd} (\texttt{10.1.2.100:3306}):
+\begin{lstlisting}[language=bash]
+mariadb -h 10.1.2.100 -u dbadmin -pcnvr2026 cnvr_db \
+  -e "INSERT INTO nodos_registrados (nombre, rol, ip_vlan)
+      VALUES ('$(hostname)', 'Pod Web Nginx', '10.1.2.50');
+      SELECT * FROM nodos_registrados;"
+\end{lstlisting}
+De forma análoga, el envío de eventos syslog hacia \texttt{10.1.2.101:514} registra instantáneamente las entradas clasificadas por IP de Pod en \texttt{/var/log/remotos/10.1.2.10/} dentro del contenedor LXC \texttt{logs}.
+
+\subsection{Personalización Web, Balanceo Ingress, Auto-reparación y Escalado}
+
+Al realizar peticiones sucesivas desde el host al controlador Ingress en la ruta del Grupo 11:
+\begin{lstlisting}[language=bash]
+for i in {1..6}; do
+  curl -s http://10.10.10.20/servers-G11 | grep "Pod (Servidor)"
+done
+\end{lstlisting}
+Las respuestas alternan entre las tres réplicas del \texttt{Deployment}, mostrando cada una su identificador único sustituido desde la plantilla del \texttt{ConfigMap} por su respectivo \texttt{initContainer}. Si se elimina manualmente un Pod (\texttt{kubectl delete pod <web-pod>}), el \texttt{ReplicaSet} instancia inmediatamente un sustituto con nuevo sufijo, nueva IP DHCP en la VLAN \texttt{1000} y su página HTML recién renderizada; y si se ejecuta \texttt{WEB\_REPLICAS=5 ./scripts/01\_deploy\_all.sh} (o \texttt{terraform apply -var="web\_replicas=5"} desde \texttt{/shared/cnvr\_final/terraform} en el nodo \texttt{terraform}), el servicio escala limpiamente a 5 instancias balanceadas y actualiza el output \texttt{web\_pod\_names} sin pérdida de peticiones.
+
+\subsection{Matriz de Auditoría de \texttt{NetworkPolicies} (Calico)}
+
+La Tabla~\ref{tab:matriz-seguridad} resume las pruebas positivas y negativas verificadas por \texttt{02\_verify\_all.sh} tras aplicar las tres políticas de red:
+
+\begin{table}[H]
+\centering
+\footnotesize
+\renewcommand{\arraystretch}{1.25}
+\begin{tabularx}{\textwidth}{l l l c >{\raggedright\arraybackslash}X}
+\toprule
+\textbf{Origen} & \textbf{Destino} & \textbf{Plano / Puerto} & \textbf{Resultado} & \textbf{Política Responsable} \\
+\midrule
+Host (\texttt{10.10.20.2}) & Ingress $\rightarrow$ Web & HTTP \texttt{:80} (\texttt{eth0}) & \textcolor{okgreen}{\textbf{PERMITIDO}} & \path{allow-ingress-to-web} (AND \texttt{ns} + \texttt{pod}) \\
+Pod \texttt{admin} / otro Pod & IP Calico Pod Web & HTTP \texttt{:80} (\texttt{eth0}) & \textcolor{errred}{\textbf{BLOQUEADO}} & \path{default-deny-all} (no es \texttt{ingress-nginx}) \\
+Host (\texttt{10.10.20.2}) & \texttt{10.10.10.11:30022} & SSH \texttt{:22} (\texttt{eth0}) & \textcolor{okgreen}{\textbf{PERMITIDO}} & \path{allow-ssh-to-admin} (\texttt{ipBlock} + \texttt{Local}) \\
+\texttt{k8s-master} (\texttt{.10.10}) & \texttt{10.10.10.11:30022} & SSH \texttt{:22} (\texttt{eth0}) & \textcolor{errred}{\textbf{BLOQUEADO}} & Fuera de \texttt{10.10.20.2/32} (IP preservada) \\
+Pods \texttt{admin} y \texttt{web} & Internet (\texttt{1.1.1.1}) & Salida (\texttt{eth0}) & \textcolor{errred}{\textbf{BLOQUEADO}} & \path{default-deny-all} (bloqueo \texttt{Egress}) \\
+Pods \texttt{admin} y \texttt{web} & Web / \texttt{bbdd} / \texttt{logs} & VLAN \texttt{1000} (\texttt{net1}) & \textcolor{okgreen}{\textbf{PERMITIDO}} & Plano L2 \texttt{macvlan} aislado en \texttt{VlanNet} \\
+\bottomrule
+\end{tabularx}
+\caption{Matriz de resultados de seguridad y conectividad verificados en el escenario.}
+\label{tab:matriz-seguridad}
+\end{table}
+
+\section{Conclusiones}
+
+El desarrollo de este trabajo final demuestra cómo integrar de forma limpia y totalmente automatizada el mundo de las infraestructuras tradicionales/virtualizadas en Linux (\textbf{VNX}, contenedores de sistema \textbf{LXC}, conmutación \textbf{Open vSwitch} y etiquetado \textbf{VLAN 802.1Q}) con arquitecturas modernas de microservicios sobre \textbf{Kubernetes} (\textbf{Calico}, \textbf{Multus}, \textbf{MetalLB} e \textbf{Ingress NGINX}) bajo el gobierno declarativo de \textbf{Terraform}.
+
+Más allá del cumplimiento estricto de todos los requisitos funcionales del enunciado, resolver problemas sutiles de sistemas ---como la coordinación IPAM mediante DHCP sin puerta de enlace en Multus para permitir escalabilidad real en \texttt{Deployments}, la conciliación entre \texttt{fsGroup: 1000} de Kubernetes y \texttt{StrictModes} de OpenSSH mediante \texttt{initContainers} sin privilegios, y la preservación de la IP origen del cliente mediante \texttt{externalTrafficPolicy: Local} para habilitar el filtrado \texttt{ipBlock} en Calico--- pone de manifiesto que dominar las abstracciones de alto nivel de la nube pasa inevitablemente por comprender con precisión cómo operan los \textit{namespaces}, interfaces virtuales, túneles IP-in-IP y tablas de \texttt{netfilter} del kernel de Linux que las sustentan.
+
+\begin{thebibliography}{10}
+\bibitem{tf-k8s} HashiCorp, \textit{Terraform Kubernetes Provider Documentation}, \url{https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs}.
+\bibitem{tf-manifest} HashiCorp, \textit{Resource: kubernetes\_manifest --- Server-Side Apply \& CRDs}, \url{https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/manifest}.
+\bibitem{tf-os} OpenStack / HashiCorp, \textit{Terraform OpenStack Provider Documentation}, \url{https://registry.terraform.io/providers/terraform-provider-openstack/openstack/latest/docs}.
+\bibitem{k8s-secrets} Kubernetes Documentation, \textit{Secrets \& Distribute Credentials Securely Using Secrets}, \url{https://kubernetes.io/docs/concepts/configuration/secret/}.
+\bibitem{k8s-netpol} Kubernetes Documentation, \textit{Network Policies \& Source IP Preservation for Services with Type=NodePort}, \url{https://kubernetes.io/docs/concepts/services-networking/network-policies/}.
+\bibitem{calico} Tigera / Project Calico, \textit{Calico Networking (IP-in-IP, BGP) and Network Policy Architecture}, \url{https://docs.tigera.io/calico/latest/about/}.
+\bibitem{multus} K8s Network Plumbing Working Group, \textit{Multus-CNI: Multi-homed pods in Kubernetes}, \url{https://github.com/k8snetworkplumbingwg/multus-cni}.
+\bibitem{vnx} D.~Fernández (DIT-UPM), \textit{Virtual Networks over LinuX (VNX) Documentation \& XML 2.0 Specification}, \url{http://web.dit.upm.es/vnxwiki/}.
+\bibitem{brikman} Y.~Brikman, \textit{Terraform: Up and Running: Writing Infrastructure as Code}, 3rd~ed., O'Reilly Media, 2022.
+\end{thebibliography}

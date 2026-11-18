@@ -1,0 +1,185 @@
+\chapter{Orquestación Declarativa con Terraform: Fundamentos e Implementación}
+
+Este capítulo sintetiza de forma completa el funcionamiento de \textbf{Terraform} ---cubriendo tanto todos los conceptos, bloques HCL y patrones introducidos en la \textbf{Práctica 1.4} como las funcionalidades avanzadas aplicadas en el \textbf{Trabajo Final}--- para servir como referencia integral de estudio y documentación técnica del despliegue.
+
+\section{Filosofía IaC y Arquitectura del Nodo \texttt{terraform} en el Laboratorio}
+
+En las prácticas iniciales (\texttt{p21} sobre OpenStack CLI y \texttt{p31} sobre \texttt{kubectl}), la creación del escenario se realizaba mediante secuencias imperativas de comandos (\texttt{openstack server create}, \texttt{kubectl create}, \texttt{kubectl apply}). El enfoque imperativo presenta limitaciones importantes: si un script se interrumpe a mitad de ejecución, relanzarlo falla por colisión de nombres; modificar parámetros exige comandos manuales de parcheo; y no existe un registro único de recursos al desmontar la infraestructura.
+
+\textbf{Terraform} (HashiCorp) aplica el paradigma declarativo de \textbf{Infraestructura como Código (IaC)} mediante el lenguaje \textbf{HCL (\textit{HashiCorp Configuration Language})}, ofreciendo un motor uniforme multi-proveedor (capaz de orquestar tanto máquinas virtuales, redes, routers e IPs flotantes en \textbf{OpenStack} con \path{terraform-provider-openstack/openstack} como cargas de contenedores y políticas en \textbf{Kubernetes} con \path{hashicorp/kubernetes}):
+\begin{itemize}
+  \item \textbf{Idempotencia}: aplicar reiteradamente una misma plantilla HCL cuando el clúster ya converge con ella produce cero operaciones (\texttt{0 added, 0 changed, 0 destroyed}).
+  \item \textbf{Reconciliación a tres bandas y detección de deriva (\textit{drift})}: Terraform contrasta la especificación deseada (\texttt{*.tf}), el estado registrado (\texttt{terraform.tfstate}) y el estado real consultado en vivo a la API del proveedor. Si un recurso se altera manualmente fuera de Terraform o se incrementa \texttt{web\_replicas} de 3 a 5, \texttt{terraform plan} calcula el diferencial exacto sin destruir el resto de la arquitectura.
+  \item \textbf{Gestión automática del ciclo de vida}: ante cambios compatibles (p.\,ej., escalar réplicas de un \texttt{Deployment}), Terraform actualiza el objeto \textit{in-place}; ante cambios en campos inmutables (p.\,ej., cambiar el \texttt{nodeSelector} o nombre de un \texttt{Pod} directo o el \textit{keypair} de una VM en OpenStack), destruye y recrea automáticamente el recurso afectado.
+\end{itemize}
+
+\subsection{Integración del Nodo Proveedor \texttt{terraform} en VNX (Práctica 1.4)}
+
+En el entorno docente de DIT-UPM (\path{/mnt/tmp/k8s_lab-calico-v02}), el cliente de Terraform no reside en el sistema anfitrión, sino en un nodo VNX dedicado llamado \textbf{\texttt{terraform}} (\texttt{10.10.10.13} en \texttt{k8s\_LAN}, con salida NAT por \texttt{virbr0} para descargar plugins desde \path{registry.terraform.io}). Nuestro script \texttt{01\_deploy\_all.sh} automatiza la secuencia exacta de puesta en marcha definida en la Práctica 1.4:
+\begin{lstlisting}[language=bash,caption={Aprovisionamiento del nodo \texttt{terraform} y exportación de credenciales del clúster.}]
+# 1. Arranque del cluster Kubernetes con Calico
+/lab/cnvr/bin/get-k8s-calico
+cd /mnt/tmp/k8s_lab-calico-v02
+./bin/start-k8s-calico
+
+# 2. Creacion del nodo VNX 'terraform' (10.10.10.13) e instalacion del binario CLI
+sudo vnx -f k8s_lab-terraform.xml --create
+sudo vnx -f k8s_lab-terraform.xml -x install-terraform
+
+# 3. Carga de kubeconfig en el host y exportacion a /root/.kube/config en 'terraform'
+./bin/get-master-kubeconf
+./bin/set-terraform-kubeconf
+\end{lstlisting}
+Entre el host (\path{/mnt/tmp/k8s_lab-calico-v02/shared}) y la máquina \texttt{terraform} (\texttt{/shared}) existe un sistema de ficheros compartido que permite editar o sincronizar los archivos \texttt{*.tf} desde el host y ejecutarlos dentro de \texttt{terraform}. Dado que \texttt{/mnt/tmp} es volátil, nuestro proyecto conserva todo el código fuente en su directorio persistente y respalda automáticamente el \texttt{terraform.tfstate} generado tras cada despliegue.
+
+\section{Bloques Fundamentales de HCL y Ciclo de Comandos}
+
+\subsection{Flujo Operativo de Comandos y Operación Selectiva con \texttt{-target}}
+
+La operación con Terraform sigue un ciclo estructurado de seis comandos principales:
+\begin{enumerate}
+  \item \textbf{\texttt{terraform init}} (y \textbf{\texttt{terraform init -upgrade}} al añadir nuevos módulos o actualizar versiones): inicializa el directorio de trabajo, descarga los binarios de los proveedores declarados en \texttt{.terraform/} y registra sus firmas criptográficas en \path{.terraform.lock.hcl}.
+  \item \textbf{\texttt{terraform validate}}: comprueba localmente la corrección sintáctica HCL, la coherencia de tipos de variables y la validez de atributos sin contactar aún con la API remota.
+  \item \textbf{\texttt{terraform plan}}: consulta el estado real en el proveedor, lo compara con el código HCL y muestra la vista previa de recursos a crear (\texttt{+}), modificar \textit{in-place} (\texttt{\textasciitilde}) o destruir/recrear (\texttt{-/+}), pudiendo guardar el plan firmado con \texttt{-out=tfplan}.
+  \item \textbf{\texttt{terraform apply}}: ejecuta los cambios planificados y actualiza \texttt{terraform.tfstate}.
+  \item \textbf{\texttt{terraform state list}} y \textbf{\texttt{terraform state show <recurso>}}: permiten auditar el inventario completo de objetos bajo control de Terraform y examinar todos los atributos en vivo de un recurso concreto (p.\,ej., \texttt{terraform state show} \path{kubernetes_deployment_v1.web}).
+  \item \textbf{\texttt{terraform destroy}} y el modificador \textbf{\texttt{-target}}: mientras que \texttt{terraform destroy} elimina ordenadamente toda la infraestructura, añadir \path{-target=<tipo>.<nombre>} (tanto en \texttt{plan}, \texttt{apply} como \texttt{destroy}) restringe la acción exclusivamente a un subgrafo concreto (p.\,ej., \texttt{terraform apply} \path{-target=kubernetes_network_policy_v1.default_deny_all}), muy útil durante pruebas incrementales de políticas de seguridad.
+\end{enumerate}
+
+\subsection{Tipos de Bloques HCL: \texttt{provider}, \texttt{variable}, \texttt{tfvars}, \texttt{data}, \texttt{output} y \texttt{module}}
+
+\begin{itemize}
+  \item \textbf{Bloques \texttt{terraform} y \texttt{provider} (\path{k8s-provider.tf})}: siguiendo la convención exacta de las plantillas de la Práctica 1.4 (\path{apartado3-1/k8s-provider.tf}), fija \texttt{required\_version = ">= 0.14.0"} y la versión exacta \texttt{version = "2.23.0"} de \path{hashicorp/kubernetes} (garantizando compatibilidad total con el binario instalado por \texttt{install-terraform} en la VM del laboratorio) e indica \texttt{config\_path = pathexpand(var.kubeconfig\_path)}.
+  \item \textbf{Variables de entrada (\texttt{variables.tf}) y los 3 métodos de parametrización}: cada bloque \texttt{variable} define \texttt{description}, \texttt{type} (\texttt{string}, \texttt{number}, \texttt{list(string)}, \texttt{map(string)}), valor \texttt{default} y reglas \texttt{validation}. Sus valores pueden suministrarse por tres vías (en orden creciente de precedencia sobre \texttt{default}):
+    \begin{enumerate}
+      \item \textbf{Carga automática mediante \texttt{terraform.tfvars}}: si el directorio contiene un fichero llamado exactamente \path{terraform.tfvars} (incluido en nuestro repositorio particularizado para el Grupo 11), Terraform lo carga automáticamente en cada \texttt{plan}/\texttt{apply} sin banderas adicionales.
+      \item \textbf{Fichero explícito}: \texttt{terraform apply} \path{-var-file=parametros.tfvars}.
+      \item \textbf{Línea de comandos (máxima precedencia)}: \texttt{terraform apply} \path{-var="web_replicas=5"}, empleada por \path{01_deploy_all.sh} para inyectar parámetros autodetectados en tiempo de ejecución.
+    \end{enumerate}
+  \item \textbf{Fuentes de datos (\texttt{data}) y salidas (\texttt{outputs.tf})}: a diferencia de \texttt{resource} (que crea y gobierna un objeto), un bloque \textbf{\texttt{data}} consulta objetos en solo lectura. En \texttt{terraform/outputs.tf} aplicamos el patrón de consulta plural \texttt{data "kubernetes\_resources"} combinado con una expresión de comprensión de listas \texttt{for} (Práctica 1.4, Apdo.~3.1) para devolver dinámicamente los nombres exactos de los Pods generados por el \texttt{Deployment} tras su creación:
+\begin{lstlisting}[language=HCL,caption={Consulta dinámica de Pods con \texttt{data "kubernetes\_resources"} y bloque \texttt{output} en \texttt{outputs.tf}.}]
+data "kubernetes_resources" "web_pods" {
+  api_version    = "v1"
+  kind           = "Pod"
+  namespace      = var.namespace
+  label_selector = "app=${local.web_labels.app}"
+  depends_on     = [kubernetes_deployment_v1.web]
+}
+
+output "web_pod_names" {
+  value = [for pod in data.kubernetes_resources.web_pods.objects : pod.metadata.name]
+}
+\end{lstlisting}
+  Los valores expuestos pueden consultarse en cualquier momento con \texttt{terraform output}, de forma individual (\texttt{terraform output web\_ingress\_url}) o en formato estructurado para scripts (\texttt{terraform output -json}).
+  \item \textbf{Módulos reutilizables (\texttt{module})}: cuando un patrón de recursos se instancia múltiples veces con distintos parámetros (como el módulo \texttt{modules/vm\_instance/\{main.tf, variables.tf, outputs.tf\}} de la Práctica 1.4 Apdo.~2.3), Terraform permite encapsularlo e invocarlo mediante bloques \texttt{module "<nombre>" \{ source = "./modules/..." \}}, accediendo a sus resultados como \texttt{module.<nombre>.<salida>}.
+\end{itemize}
+
+\section{Las Cuatro Formas de Referenciar Recursos de Kubernetes en Terraform}
+
+Un aspecto clave analizado en la Práctica 1.4 (Apdo.~3.2) es cómo vincular el \texttt{selector} de un \texttt{Service} o \texttt{NetworkPolicy} con las etiquetas (\texttt{labels}) de los Pods de un \texttt{Deployment}. La Tabla~\ref{tab:cuatro-referencias} compara las cuatro alternativas existentes en HCL:
+
+\begin{table}[H]
+\centering
+\footnotesize
+\renewcommand{\arraystretch}{1.25}
+\begin{tabularx}{\textwidth}{l >{\raggedright\arraybackslash}p{4.8cm} >{\raggedright\arraybackslash}X}
+\toprule
+\textbf{Estrategia} & \textbf{Expresión HCL en \texttt{selector}} & \textbf{Ventajas, Limitaciones y Uso} \\
+\midrule
+1. Etiquetas literales & \texttt{selector = \{ app = "web" \}} & Sencilla y directa (idéntica a YAML), pero propensa a desincronización humana si cambian las etiquetas y \textbf{no informa a Terraform} de dependencia en el DAG. \\
+2. Referencia directa a recurso & \path{kubernetes_deployment_v1.web.spec[0].template[0].metadata[0].labels} & Crea \textbf{dependencia implícita automática} en el grafo DAG y propaga cambios de etiquetas; requiere indexar con \texttt{[0]} cada sub-bloque del esquema y resulta verbosa. \\
+3. Fuente de datos \texttt{data} & \path{data.kubernetes_resource.web.object.spec.template.metadata.labels} & Opción idónea cuando el \texttt{Deployment} objetivo \textbf{ya existía previamente} en el clúster fuera del control de nuestra plantilla Terraform. \\
+4. Valores locales (\texttt{locals}) & \texttt{selector = local.web\_labels} (definido en \texttt{locals.tf}) & \textbf{Fuente única de verdad} limpia y legible compartida entre \texttt{Deployment}, \texttt{Service} y \texttt{NetworkPolicy}; al no apuntar de un recurso a otro, no añade arista implícita por sí sola. \\
+\bottomrule
+\end{tabularx}
+\caption{Comparativa de los cuatro mecanismos de referencia entre recursos Kubernetes en Terraform.}
+\label{tab:cuatro-referencias}
+\end{table}
+
+En nuestra arquitectura (\texttt{terraform/}) combinamos lo mejor de los métodos \textbf{4} y \textbf{2}: centralizamos las etiquetas en \textbf{\path{locals.tf}} (\path{local.web_labels} y \path{local.admin_labels}) para mantener una legibilidad impecable sin duplicación en \path{web.tf}, \path{admin.tf}, \path{services_ingress.tf}, \path{network_policies.tf} y \path{outputs.tf}, mientras que enlazamos nombres de objetos mediante referencias directas (\path{kubernetes_service_v1.web.metadata[0].name}, \path{kubernetes_secret_v1.*.metadata[0].name}) y sentencias explícitas \texttt{depends\_on} donde la dependencia opera en el plano de datos CNI.
+
+\section{Grafo de Dependencias (DAG), \texttt{kubernetes\_manifest} y Sutilezas HCL2}
+
+Durante \texttt{plan} y \texttt{apply}, Terraform construye un \textbf{Grafo Acíclico Dirigido (DAG)} para paralelizar la creación de objetos independientes respetando el orden estricto entre capas (Figura~\ref{fig:dag-terraform}):
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  font=\sffamily\scriptsize,
+  tfnode/.style={draw=upmblue, rounded corners=3pt, fill=white, thick, align=center, inner sep=4.5pt, minimum width=3.2cm},
+  crdnode/.style={draw=upmaccent, rounded corners=3pt, fill=upmaccent!8, thick, align=center, inner sep=4.5pt, minimum width=3.2cm},
+  npnode/.style={draw=errred!80!black, rounded corners=3pt, fill=errred!6, thick, align=center, inner sep=4.5pt, minimum width=3.2cm},
+  datanode/.style={draw=okgreen!80!black, rounded corners=3pt, fill=okgreen!7, thick, align=center, inner sep=4.5pt, minimum width=3.2cm},
+  dep/.style={-{Stealth[length=2mm]}, thick, color=darkslate},
+  expdep/.style={-{Stealth[length=2mm]}, thick, dashed, color=upmaccent}
+]
+
+  % Nivel 1: Recursos base paralelos
+  \node[tfnode] (sec) at (-4.5, 2.6) {\textbf{\texttt{secrets.tf}}\\3 $\times$ \texttt{kubernetes\_secret\_v1}};
+  \node[tfnode] (cm)  at (0.0, 2.6)  {\textbf{\texttt{configmap.tf}}\\\texttt{web-html-template}};
+  \node[crdnode] (nad) at (4.5, 2.6) {\textbf{\texttt{multus.tf}}\\2 $\times$ \texttt{kubernetes\_manifest} (NAD)};
+
+  % Nivel 2: Workloads y Services
+  \node[tfnode] (adm) at (-4.5, 0.7) {\textbf{\texttt{admin.tf}}\\\texttt{kubernetes\_pod\_v1.admin}};
+  \node[tfnode] (web) at (0.0, 0.7)  {\textbf{\texttt{web.tf}}\\\texttt{kubernetes\_deployment\_v1.web}};
+  \node[tfnode] (ic)  at (4.5, 0.7)  {\textbf{\texttt{services\_ingress.tf}}\\\texttt{IngressClass} + \texttt{Services}};
+
+  % Nivel 3: Policies, Data Pod List e Ingress
+  \node[npnode]   (np)  at (-4.5, -1.3) {\textbf{\texttt{network\_policies.tf}}\\3 $\times$ \texttt{NetworkPolicy}};
+  \node[datanode] (dat) at (0.0, -1.3)  {\textbf{\texttt{outputs.tf}}\\\texttt{data.kubernetes\_resources}};
+  \node[tfnode]   (ing) at (4.5, -1.3)  {\textbf{\texttt{services\_ingress.tf}}\\\texttt{kubernetes\_ingress\_v1.web}};
+
+  % Aristas implicitas (solidas) y explicitas depends_on (discontinuas)
+  \draw[dep] (sec) -- (adm);
+  \draw[dep] (sec.south east) -- (web.north west);
+  \draw[dep] (cm)  -- node[right, font=\sffamily\tiny] {\texttt{sha256()}} (web);
+  \draw[expdep] (nad.south west) -- node[pos=0.5, above, sloped, font=\sffamily\tiny] {\texttt{depends\_on}} (web.north east);
+  \draw[expdep] (nad.south) to[out=-145,in=20] (adm.north east);
+
+  \draw[expdep] (adm) -- (np);
+  \draw[expdep] (web.south west) -- (np.north east);
+  \draw[expdep] (web) -- (dat);
+  \draw[dep] (ic) -- (ing);
+
+\end{tikzpicture}
+\caption{Grafo de dependencias (DAG) en Terraform: líneas continuas para referencias implícitas HCL y discontinuas para dependencias explícitas \texttt{depends\_on}.}
+\label{fig:dag-terraform}
+\end{figure}
+
+Obsérvese por qué \texttt{depends\_on} en \texttt{web.tf} y \texttt{admin.tf} hacia \texttt{kubernetes\_manifest.vlan\_*} es crítico: para Kubernetes, el nombre de la red Multus es una cadena de texto en una anotación (\texttt{local.vlan\_dhcp\_nad\_name}). Sin \texttt{depends\_on}, Terraform lanzaría en paralelo la creación de la \texttt{NetworkAttachmentDefinition} y de los Pods, provocando errores \texttt{FailedCreatePodSandBox} si el \texttt{kubelet} consultase el CRD milisegundos antes de su registro en \texttt{etcd}.
+
+\subsection{CRDs Personalizados con \texttt{kubernetes\_manifest} y Sutilezas HCL2}
+
+Mientras que los objetos estándar usan recursos tipados nativos (\texttt{kubernetes\_deployment\_v1}, \texttt{kubernetes\_secret\_v1}), los Custom Resource Definitions de terceros como \path{NetworkAttachmentDefinition} (\path{k8s.cni.cncf.io/v1}) requieren el recurso genérico \textbf{\texttt{kubernetes\_manifest}} (Práctica 1.4, Apdo.~3.4), que emplea \textit{Server-Side Apply} validando el objeto contra el esquema OpenAPI del \texttt{kube-apiserver}:
+
+\begin{lstlisting}[language=HCL,caption={Definición declarativa de las redes Multus en \texttt{terraform/multus.tf} usando \texttt{locals} y \texttt{jsonencode()}.}]
+resource "kubernetes_manifest" "vlan_dhcp" {
+  manifest = {
+    apiVersion = "k8s.cni.cncf.io/v1"
+    kind       = "NetworkAttachmentDefinition"
+    metadata = {
+      name      = local.vlan_dhcp_nad_name
+      namespace = var.namespace
+    }
+    spec = {
+      config = jsonencode({
+        cniVersion = "0.3.1"
+        name       = local.vlan_dhcp_nad_name
+        type       = "macvlan"
+        master     = "${var.worker_vlan_parent_iface}.${var.vlan_id}"
+        mode       = "bridge"
+        ipam       = { type = "dhcp" }
+      })
+    }
+  }
+  field_manager { force_conflicts = true }
+}
+\end{lstlisting}
+
+Finalmente, destacan cuatro detalles técnicos de HCL2 aplicados en nuestros módulos:
+\begin{enumerate}
+  \item \textbf{Inyección nativa de claves SSH con \texttt{file()}}: en \texttt{secrets.tf}, \texttt{kubernetes\_secret\_v1} lee directamente las claves generadas en \texttt{../keys/} mediante \texttt{file("\$\{path.module\}/...")}, codificándolas automáticamente en Base64 hacia la API de Kubernetes sin usar \texttt{kubectl}.
+  \item \textbf{Permisos octales como cadenas (\texttt{"0440"})}: HCL2 no interpreta literales numéricos con cero inicial como octales (\texttt{0440} numérico sería decimal \texttt{440}). Pasar \texttt{default\_mode = "0440"} y \texttt{mode = "0440"} como cadenas en \texttt{admin.tf} y \texttt{web.tf} aplica el modo octal exacto (\texttt{-r--r-----}).
+  \item \textbf{Escape de variables shell \texttt{\$\$} en bloques \textit{heredoc}}: dentro del comando del \texttt{initContainer} (\texttt{<<-EOT}), escribir \texttt{\$\$\{POD\_NAME\}} escapa la interpolación de Terraform para que llegue literalmente como \texttt{\$\{POD\_NAME\}} al intérprete \texttt{/bin/sh} del contenedor.
+  \item \textbf{Actualización rodante automática con \texttt{sha256()}}: la anotación \path{"cnvr.upm.es/template-hash"} calculada con \path{sha256(kubernetes_config_map_v1.web_html_template.data["index.html"])} provoca un \textit{rolling update} automático de las réplicas web cada vez que se edita el HTML del \texttt{ConfigMap}.
+\end{enumerate}

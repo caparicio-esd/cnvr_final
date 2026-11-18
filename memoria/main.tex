@@ -1,0 +1,205 @@
+\documentclass[11pt,a4paper]{report}
+
+% ==============================================================================
+% Compatibilidad dual XeTeX (Tectonic) y pdfLaTeX (Overleaf / Lab Debian)
+% ==============================================================================
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[utf8]{inputenc}
+  \usepackage[T1]{fontenc}
+  \usepackage{lmodern}
+\else
+  \usepackage{fontspec}
+\fi
+
+\usepackage[spanish,es-tabla,es-noquoting,es-noshorthands]{babel}
+\usepackage[margin=2.4cm,headheight=15pt]{geometry}
+\usepackage{microtype}
+\usepackage{parskip}
+\usepackage{setspace}
+\onehalfspacing
+\setlength{\emergencystretch}{3em}
+
+% Colores corporativos y academicos (estilo UPM / ingenieria)
+\usepackage[table,dvipsnames]{xcolor}
+\definecolor{upmblue}{HTML}{003865}
+\definecolor{upmaccent}{HTML}{0284C7}
+\definecolor{darkslate}{HTML}{0F172A}
+\definecolor{codebg}{HTML}{F8FAFC}
+\definecolor{codeframe}{HTML}{CBD5E1}
+\definecolor{okgreen}{HTML}{15803D}
+\definecolor{warnamber}{HTML}{B45309}
+\definecolor{errred}{HTML}{B91C1C}
+
+% Graficos, tablas y diagramas vectoriales TikZ
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{longtable}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{float}
+\usepackage{caption}
+\captionsetup{font=small,labelfont={bf,color=upmblue}}
+
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,shapes.geometric,fit,backgrounds,calc}
+
+% Cajas destacadas para decisiones de ingenieria, notas y resultados
+\usepackage[most]{tcolorbox}
+\newtcolorbox{decisionbox}[1]{
+  enhanced,
+  breakable,
+  colback=upmblue!4,
+  colframe=upmblue,
+  fonttitle=\bfseries,
+  title={#1},
+  left=8pt,right=8pt,top=6pt,bottom=6pt,
+  boxrule=0.8pt,
+  arc=3pt
+}
+
+\newtcolorbox{outcomebox}[1]{
+  enhanced,
+  breakable,
+  colback=okgreen!5,
+  colframe=okgreen!85!black,
+  fonttitle=\bfseries,
+  title={#1},
+  left=8pt,right=8pt,top=6pt,bottom=6pt,
+  boxrule=0.8pt,
+  arc=3pt
+}
+
+\newtcolorbox{warnbox}[1]{
+  enhanced,
+  breakable,
+  colback=warnamber!6,
+  colframe=warnamber!90!black,
+  fonttitle=\bfseries,
+  title={#1},
+  left=8pt,right=8pt,top=6pt,bottom=6pt,
+  boxrule=0.8pt,
+  arc=3pt
+}
+
+% Configuracion de bloques de codigo (HCL, YAML, XML, Bash)
+\usepackage{listings}
+\lstdefinestyle{cnvrcode}{
+  backgroundcolor=\color{codebg},
+  basicstyle=\ttfamily\footnotesize,
+  breakatwhitespace=false,
+  breaklines=true,
+  captionpos=b,
+  commentstyle=\color{gray!80!black}\itshape,
+  frame=single,
+  rulecolor=\color{codeframe},
+  keepspaces=true,
+  keywordstyle=\color{upmblue}\bfseries,
+  numbers=left,
+  numbersep=7pt,
+  numberstyle=\tiny\color{gray},
+  showspaces=false,
+  showstringspaces=false,
+  showtabs=false,
+  stringstyle=\color{okgreen},
+  tabsize=2,
+  xleftmargin=12pt,
+  framexleftmargin=12pt
+}
+
+\lstdefinelanguage{HCL}{
+  morekeywords={terraform,required_providers,provider,variable,resource,data,output,locals,module,true,false,null,for_each,count,depends_on,validation},
+  sensitive=true,
+  morecomment=[l]{\#},
+  morecomment=[l]{//},
+  morecomment=[s]{/*}{*/},
+  morestring=[b]"
+}
+
+\lstdefinelanguage{YAML}{
+  morekeywords={true,false,null,apiVersion,kind,metadata,spec,name,namespace,labels,annotations,containers,initContainers,volumes,ports,selector,rules,ingress,egress,policyTypes},
+  sensitive=true,
+  morecomment=[l]{\#},
+  morestring=[b]",
+  morestring=[b]'
+}
+
+\lstset{style=cnvrcode}
+
+% Cabeceras, titulos e hipervinculos
+\usepackage{titlesec}
+\titleformat{\chapter}[display]
+  {\normalfont\huge\bfseries\color{upmblue}}
+  {\filright\normalsize\color{upmaccent}\MakeUppercase{\chaptertitlename}\ \thechapter}{4pt}{\Huge}
+\titlespacing*{\chapter}{0pt}{-10pt}{18pt}
+\titleformat{\section}{\Large\bfseries\color{upmblue}}{\thesection}{0.8em}{}
+\titleformat{\subsection}{\large\bfseries\color{darkslate}}{\thesubsection}{0.8em}{}
+
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\textcolor{gray}{CNVR / ARSN (2026-27) --- Trabajo Final}}
+\fancyhead[R]{\small\textcolor{gray}{Grupo 11 $\cdot$ K8s + VNX + Terraform}}
+\fancyfoot[C]{\small\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\usepackage{enumitem}
+\setlist{nosep,topsep=4pt}
+
+\usepackage{xurl}
+\usepackage[colorlinks=true,linkcolor=upmblue,urlcolor=upmaccent,citecolor=upmblue]{hyperref}
+
+\begin{document}
+
+% ==============================================================================
+% PORTADA
+% ==============================================================================
+\begin{titlepage}
+  \centering
+  \vspace*{0.2cm}
+  {\Large\bfseries\textcolor{upmblue}{UNIVERSIDAD POLITÉCNICA DE MADRID}}\\[0.2cm]
+  {\large Escuela Técnica Superior de Ingenieros de Telecomunicación}\\[0.1cm]
+  {\normalsize Departamento de Ingeniería de Sistemas Telemáticos (DIT)}\\[0.25cm]
+  {\small\textsc{Máster Universitario en Ingeniería de Redes y Servicios Telemáticos (MUIRST)}}
+
+  \vspace{0.8cm}
+  \textcolor{upmaccent}{\rule{\linewidth}{1.5pt}}\\[0.35cm]
+  {\large\bfseries\textcolor{darkslate}{Trabajo Final de Asignatura}}\\[0.25cm]
+  {\huge\bfseries\textcolor{upmblue}{Despliegue Automático de una Aplicación Escalable sobre Kubernetes y VNX Orquestado con Terraform}}\\[0.3cm]
+  {\normalsize Memoria Técnica, Fundamentos de Redes en Linux, Arquitectura Kubernetes y Decisiones de Ingeniería}\\[0.3cm]
+  \textcolor{upmaccent}{\rule{\linewidth}{1.5pt}}
+
+  \vspace{0.85cm}
+  \begin{tabular}{rl}
+    \textbf{Asignaturas:} & Computación en Nube y Virtualización de Redes y Servicios (CNVR) \\
+                          & Arquitectura de Redes y Servicios en la Nube (ARSN) \\[0.2cm]
+    \textbf{Autor:}       & Carlos Aparicio de Santiago \\[0.15cm]
+    \textbf{Grupo:}       & Grupo 11 (\texttt{/servers-G11}) \\[0.15cm]
+    \textbf{Curso:}       & 2026--2027 \\[0.15cm]
+    \textbf{Fecha:}       & Noviembre de 2026
+  \end{tabular}
+
+  \vfill
+  \begin{tcolorbox}[colback=codebg,colframe=codeframe,width=0.96\linewidth,arc=3pt,boxrule=0.6pt]
+    \footnotesize
+    \textbf{Resumen Ejecutivo:} Este documento detalla el diseño, la fundamentación teórica y la automatización extremo a extremo de una infraestructura híbrida compuesta por un clúster de Kubernetes (con CNI primario \textbf{Calico} y meta-CNI \textbf{Multus}) interconectado a nivel de enlace mediante una VLAN IEEE 802.1Q compartida (\texttt{VlanNet}) con contenedores \textbf{LXC} gestionados por \textbf{VNX} (servidor de base de datos \textbf{MariaDB} y servidor centralizado de \textbf{Rsyslog}). Todo el ciclo de vida de los recursos de red, secretos SSH, plantillas HTML dinámicas, despliegues escalables, balanceo Ingress y políticas de seguridad \textit{Zero-Trust} (\texttt{NetworkPolicy}) se orquesta de manera declarativa mediante \textbf{Terraform}.
+  \end{tcolorbox}
+\end{titlepage}
+
+\pagenumbering{roman}
+\tableofcontents
+\clearpage
+\pagenumbering{arabic}
+
+% ==============================================================================
+% CAPITULOS MODULARES
+% ==============================================================================
+\input{capitulos/01_introduccion_arquitectura}
+\input{capitulos/02_redes_linux}
+\input{capitulos/03_kubernetes_profundidad}
+\input{capitulos/04_terraform_orquestacion}
+\input{capitulos/05_decisiones_implementacion}
+\input{capitulos/06_verificacion_conclusiones}
+
+\end{document}

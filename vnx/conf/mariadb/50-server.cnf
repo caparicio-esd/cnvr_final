@@ -1,0 +1,24 @@
+# Configuracion de MariaDB para el contenedor LXC 'bbdd' (10.1.2.100)
+# Permite conexiones remotas desde la VLAN compartida (10.1.2.0/24)
+
+[server]
+
+[mysqld]
+user                    = mysql
+pid-file                = /run/mysqld/mysqld.pid
+basedir                 = /usr
+datadir                 = /var/lib/mysql
+tmpdir                  = /tmp
+lc-messages-dir         = /usr/share/mysql
+lc-messages             = en_US
+skip-external-locking
+
+# Escuchar en todas las interfaces (necesario para acceso desde Pods web y admin en VLAN 1000)
+bind-address            = 0.0.0.0
+port                    = 3306
+
+character-set-server    = utf8mb4
+collation-server        = utf8mb4_general_ci
+
+[embedded]
+[mariadb]
