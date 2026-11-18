@@ -10,9 +10,17 @@
 ```text
 cnvr_final/
 ├── scripts/
-│   ├── 01_deploy_all.sh        # Despliegue integral (Claves SSH -> K8s Calico -> Nodo VNX terraform -> VLAN Workers -> VNX LXC -> Terraform)
-│   ├── 02_verify_all.sh        # Bateria automatizada de pruebas (Terraform State, VLAN, SSH, MariaDB, Rsyslog, Ingress, NetworkPolicies)
-│   └── 03_destroy_all.sh       # Destruccion limpia e idempotente (--full para apagar tambien k8s_lab-terraform y K8s Calico)
+│   ├── 01_deploy_all.sh        # Ensamblador de despliegue: ejecuta en orden pasos/01..06
+│   ├── 02_verify_all.sh        # Ensamblador de pruebas: ejecuta en orden pasos/test_01..06
+│   ├── 03_destroy_all.sh       # Destruccion limpia del escenario (--full para apagar tambien K8s)
+│   └── pasos/                  # Mini-scripts individuales ejecutables paso a paso
+│       ├── 01_claves_ssh.sh
+│       ├── 02_k8s_y_terraform_vm.sh
+│       ├── 03_vlan_workers.sh
+│       ├── 04_vnx_lxc.sh
+│       ├── 05_terraform_apply.sh
+│       ├── 06_instalar_mariadb_client.sh
+│       └── test_01..06_*.sh    # Verificaciones independientes por bloque
 ├── vnx/
 │   ├── k8s_lxc_vlan.xml        # Escenario VNX con contenedores LXC 'bbdd' (10.1.2.100) y 'logs' (10.1.2.101) en VLAN 1000
 │   └── conf/                   # Configuraciones inyectadas mediante <filetree> (MariaDB, Rsyslog, Dnsmasq DHCP, SSH)
@@ -40,16 +48,15 @@ cnvr_final/
 El script `01_deploy_all.sh` automatiza íntegramente el flujo de la **Práctica 1.4** y del **Trabajo Final**: arranca `k8s_lab-calico-v02`, levanta e instala el nodo proveedor `terraform` (`k8s_lab-terraform.xml`, `10.10.10.13`), exporta credenciales (`get-master-kubeconf` y `set-terraform-kubeconf`), sincroniza las plantillas HCL en la carpeta compartida `/shared`, despliega el escenario VNX complementario (`bbdd` y `logs`) y ejecuta `terraform init / validate / plan / apply`.
 
 ```bash
-# 1. Desplegar toda la infraestructura y aplicacion de principio a fin
-chmod +x scripts/*.sh
+# 1. Desplegar toda la infraestructura y aplicacion de principio a fin (o ejecutar pasos/01..06 uno a uno)
+chmod +x scripts/*.sh scripts/pasos/*.sh
 ./scripts/01_deploy_all.sh
 
 # 2. Ejecutar todas las comprobaciones de conectividad, servicios, balanceo y seguridad
 ./scripts/02_verify_all.sh
 
 # 3. Escalar horizontalmente los servidores web (ejemplo a 5 replicas desde el nodo VNX terraform)
-WEB_REPLICAS=5 ./scripts/01_deploy_all.sh
-# (O directamente dentro del nodo 'terraform': cd /shared/cnvr_final/terraform && terraform apply -var="web_replicas=5")
+ssh root@terraform "cd /shared/cnvr_final/terraform && terraform apply -auto-approve -var='web_replicas=5'"
 
 # 4. Destruir la aplicacion y el escenario complementario (o anadir --full para apagar tambien K8s)
 ./scripts/03_destroy_all.sh

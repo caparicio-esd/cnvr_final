@@ -21,3 +21,6 @@ memoria/*.synctex.gz
 # Claves privadas generadas localmente
 keys/id_rsa_*
 vnx/conf/ssh/authorized_keys
+
+# Otras cosas
+.DS_Store

@@ -2,20 +2,20 @@
 
 \section{Flujo Automatizado de Despliegue (\texttt{01\_deploy\_all.sh})}
 
-Todo el proceso de puesta en marcha se condensa en un único comando ejecutable desde el host del laboratorio:
+Todo el proceso de puesta en marcha puede ejecutarse paso a paso desde \path{scripts/pasos/} o ensamblado de principio a fin desde el host del laboratorio:
 \begin{lstlisting}[language=bash]
-chmod +x scripts/*.sh
+chmod +x scripts/*.sh scripts/pasos/*.sh
 ./scripts/01_deploy_all.sh
 \end{lstlisting}
 
-El script ejecuta de forma secuencial y limpia (\texttt{set -euo pipefail}) los seis pasos del escenario sobre el entorno del laboratorio:
+El ensamblador \texttt{01\_deploy\_all.sh} encadena de forma secuencial e imperativa (\texttt{set -e}) los seis mini-scripts del escenario:
 \begin{enumerate}
-  \item Generación de \texttt{keys/id\_rsa\_internal} (Par 1) y \texttt{keys/id\_rsa\_external} (Par 2) y copia de la clave pública interna hacia \texttt{vnx/conf/ssh/authorized\_keys}.
-  \item Arranque del clúster Kubernetes con Calico (\path{/lab/cnvr/bin/get-k8s-calico} $\rightarrow$ \path{./bin/start-k8s-calico}), carga de credenciales con \path{./bin/get-master-kubeconf}, despliegue del nodo proveedor \textbf{\texttt{terraform}} (\texttt{sudo vnx -f} \path{k8s_lab-terraform.xml} \texttt{--create} y \texttt{-x install-terraform}) y exportación de su kubeconfig con \path{./bin/set-terraform-kubeconf}.
-  \item Creación de la subinterfaz \texttt{e2.1000} y arranque del demonio CNI \texttt{dhcp} (\path{/run/cni/dhcp.sock}) en \texttt{k8s-worker1} y \texttt{k8s-worker2}.
-  \item Despliegue del escenario complementario VNX (\texttt{sudo vnx -f k8s\_lxc\_vlan.xml -v --create} y \texttt{-x setup}) para aprovisionar OpenSSH, MariaDB, Rsyslog, Dnsmasq y Tinyproxy en \texttt{bbdd} y \texttt{logs}.
-  \item Sincronización de \texttt{terraform/*.tf}, \texttt{terraform.tfvars} y \texttt{keys/} en \texttt{/shared/cnvr\_final/} y ejecución remota en el nodo \texttt{terraform} de \texttt{terraform init}, \texttt{terraform validate} y \texttt{terraform apply -auto-approve}, respaldando el fichero de estado.
-  \item Instalación de \texttt{mariadb-client} en el Pod \texttt{admin} y en las réplicas web empleando el proxy interno de la VLAN (\texttt{10.1.2.101:8888}), mostrando finalmente \texttt{terraform output}.
+  \item \textbf{\path{pasos/01_claves_ssh.sh}}: generación de \path{keys/id_rsa_internal} (Par 1) y \path{keys/id_rsa_external} (Par 2) y copia de la clave pública interna hacia \path{vnx/conf/ssh/authorized_keys}.
+  \item \textbf{\path{pasos/02_k8s_y_terraform_vm.sh}}: arranque del clúster Kubernetes con Calico (\path{/lab/cnvr/bin/get-k8s-calico} $\rightarrow$ \path{./bin/start-k8s-calico}), carga de credenciales con \path{./bin/get-master-kubeconf}, despliegue del nodo proveedor \textbf{\texttt{terraform}} (\texttt{sudo vnx -f} \path{k8s_lab-terraform.xml} \texttt{--create} y \texttt{-x install-terraform}) y exportación de su kubeconfig con \path{./bin/set-terraform-kubeconf}.
+  \item \textbf{\path{pasos/03_vlan_workers.sh}}: creación de la subinterfaz \texttt{e2.1000} y arranque del demonio CNI \texttt{dhcp} (\path{/run/cni/dhcp.sock}) en \texttt{k8s-worker1} y \texttt{k8s-worker2}.
+  \item \textbf{\path{pasos/04_vnx_lxc.sh}}: despliegue del escenario complementario VNX (\texttt{sudo vnx -f k8s\_lxc\_vlan.xml -v --create} y \texttt{-x setup}) para aprovisionar OpenSSH, MariaDB, Rsyslog, Dnsmasq y Tinyproxy en \texttt{bbdd} y \texttt{logs}.
+  \item \textbf{\path{pasos/05_terraform_apply.sh}}: sincronización de \texttt{terraform/*.tf}, \texttt{terraform.tfvars} y \texttt{keys/} en \texttt{/shared/cnvr\_final/} y ejecución en el nodo \texttt{terraform} de \texttt{terraform init}, \texttt{terraform validate} y \texttt{terraform apply -auto-approve}.
+  \item \textbf{\path{pasos/06_instalar_mariadb_client.sh}}: instalación de \texttt{mariadb-client} en el Pod \texttt{admin} y en las réplicas web empleando el proxy interno de la VLAN (\texttt{10.1.2.101:8888}).
 \end{enumerate}
 
 \section{Protocolo de Verificación Integral (\texttt{02\_verify\_all.sh})}
@@ -63,7 +63,7 @@ for i in {1..6}; do
   curl -s http://10.10.10.20/servers-G11 | grep "Pod (Servidor)"
 done
 \end{lstlisting}
-Las respuestas alternan entre las tres réplicas del \texttt{Deployment}, mostrando cada una su identificador único sustituido desde la plantilla del \texttt{ConfigMap} por su respectivo \texttt{initContainer}. Si se elimina manualmente un Pod (\texttt{kubectl delete pod <web-pod>}), el \texttt{ReplicaSet} instancia inmediatamente un sustituto con nuevo sufijo, nueva IP DHCP en la VLAN \texttt{1000} y su página HTML recién renderizada; y si se ejecuta \texttt{WEB\_REPLICAS=5 ./scripts/01\_deploy\_all.sh} (o \texttt{terraform apply -var="web\_replicas=5"} desde \texttt{/shared/cnvr\_final/terraform} en el nodo \texttt{terraform}), el servicio escala limpiamente a 5 instancias balanceadas y actualiza el output \texttt{web\_pod\_names} sin pérdida de peticiones.
+Las respuestas alternan entre las tres réplicas del \texttt{Deployment}, mostrando cada una su identificador único sustituido desde la plantilla del \texttt{ConfigMap} por su respectivo \texttt{initContainer}. Si se elimina manualmente un Pod (\texttt{kubectl delete pod <web-pod>}), el \texttt{ReplicaSet} instancia inmediatamente un sustituto con nuevo sufijo, nueva IP DHCP en la VLAN \texttt{1000} y su página HTML recién renderizada; y si se ejecuta \texttt{terraform apply} \path{-var="web_replicas=5"} desde \path{/shared/cnvr_final/terraform} en el nodo \texttt{terraform}, el servicio escala limpiamente a 5 instancias balanceadas y actualiza el output \texttt{web\_pod\_names} sin pérdida de peticiones.
 
 \subsection{Matriz de Auditoría de \texttt{NetworkPolicies} (Calico)}
 
