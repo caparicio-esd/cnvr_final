@@ -19,8 +19,8 @@ cd "$PROYECTO_DIR/vnx"
 sudo vnx -f k8s_lxc_vlan.xml -v --destroy || true
 
 echo "=== 3. Eliminar subinterfaces e2.1000 y demonio DHCP en workers ==="
-ssh root@k8s-worker1 "ip link del e2.1000 2>/dev/null || true; pkill -f '/opt/cni/bin/dhcp daemon' || true"
-ssh root@k8s-worker2 "ip link del e2.1000 2>/dev/null || true; pkill -f '/opt/cni/bin/dhcp daemon' || true"
+ssh root@k8s-worker1 "ip link del e2.1000 2>/dev/null || true; pkill -x dhcp || true"
+ssh root@k8s-worker2 "ip link del e2.1000 2>/dev/null || true; pkill -x dhcp || true"
 
 if [ "$1" = "--full" ]; then
   echo "=== 4. Apagar nodo 'terraform' y cluster Kubernetes (--full) ==="

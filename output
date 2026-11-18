@@ -1,0 +1,764 @@
+ce.aparicio@l018:~$ cd /mnt/tmp/
+ce.aparicio@l018:/mnt/tmp$ git clone https://github.com/caparicio-esd/cnvr_final
+Clonando en 'cnvr_final'...
+remote: Enumerating objects: 67, done.
+remote: Counting objects: 100% (67/67), done.
+remote: Compressing objects: 100% (59/59), done.
+remote: Total 67 (delta 6), reused 67 (delta 6), pack-reused 0 (from 0)
+Recibiendo objetos: 100% (67/67), 348.24 KiB | 3.91 MiB/s, listo.
+Resolviendo deltas: 100% (6/6), listo.
+ce.aparicio@l018:/mnt/tmp$ cd cnvr_final/
+ce.aparicio@l018:/mnt/tmp/cnvr_final$ ls
+memoria  README.md  scripts  terraform  vnx
+ce.aparicio@l018:/mnt/tmp/cnvr_final$ chmod +x scripts/*.sh scripts/pasos/*.sh
+ce.aparicio@l018:/mnt/tmp/cnvr_final$ ./scripts/01_deploy_all.sh
+=== PASO 1: Generar los dos pares de claves SSH en keys/ ===
+Generating public/private rsa key pair.
+Your identification has been saved in keys/id_rsa_internal
+Your public key has been saved in keys/id_rsa_internal.pub
+The key fingerprint is:
+SHA256:HUB9Zab0t6JWEeAKA20EogAu1APD7kVIbHglZGWU0B8 ce.aparicio@l018
+The key's randomart image is:
++---[RSA 4096]----+
+|O*OB=++oo. .oo+  |
+|=*+*+ Eo .o..=.  |
+|++. ...+  .o... .|
+|.. .  . o...  ...|
+|. .     S..  o . |
+| .          o .  |
+|           o     |
+|          .      |
+|                 |
++----[SHA256]-----+
+Generating public/private rsa key pair.
+Your identification has been saved in keys/id_rsa_external
+Your public key has been saved in keys/id_rsa_external.pub
+The key fingerprint is:
+SHA256:3fFSxON9FQg2u+LIPosp5J/0kE8XhY87HhU3bBhZMQM ce.aparicio@l018
+The key's randomart image is:
++---[RSA 4096]----+
+|           E=*+..|
+|          o.*o= .|
+|         . =.*.o.|
+|         .+.=+o o|
+|        S+.+o . .|
+|   .  o o =  .   |
+|  o  + + *       |
+|   o. X.o o      |
+|    o= =o.       |
++----[SHA256]-----+
+=== PASO 2: Arrancar cluster Kubernetes (Calico) y nodo Terraform ===
+--
+-- Copying k8s_lab-calico-v02.tgz file...
+sending incremental file list
+k8s_lab-calico-v02.tgz
+          3,17G 100%  109,62MB/s    0:00:27 (xfr#1, to-chk=0/1)
+
+real	0m27,665s
+user	0m3,047s
+sys	0m6,499s
+--
+-- Unpacking k8s_lab-calico-v02.tgz file...
+Authorization required, but no authorization protocol specified
+
+xhost:  unable to open display ":10.0"
+
+------------------------------------------------------------------------------------------
+Virtual Networks over LinuX (VNX) -- http://www.dit.upm.es/vnx - vnx@dit.upm.es
+Version: 2.0b.6877 (built on 20/09/2026_23:36)
+------------------------------------------------------------------------------------------
+  OS=Debian GNU/Linux 13 (trixie)
+  VNX executed as root
+  xhost +SI:localuser:root executed 
+  CONF file: /etc/vnx.conf
+  IPv6 enabled: yes
+  TMP dir=/tmp
+  VNX dir=/mnt/tmp/ce.aparicio/.vnx
+
+VNX unpack scenario mode:
+-- Unpackaging scenario k8s_lab-calico-v02.tgz
+2.95GiB 0:00:53 [56.5MiB/s] [===========================================================================================================================>] 100%            
+-- ...done
+--
+-- Executing /lab/cnvr/bin/prepare-vnx-debian
+localuser:root being added to access control list
+--
+-- Openstack tutorial scenario copied and unpacked in 84 seconds
+--
+/mnt/tmp/k8s_lab-calico-v02
+--
+-- Starting K8S Calico virtual laboratory
+--
+localuser:root being added to access control list
+
+------------------------------------------------------------------------------------------
+Virtual Networks over LinuX (VNX) -- http://www.dit.upm.es/vnx - vnx@dit.upm.es
+Version: 2.0b.6877 (built on 20/09/2026_23:36)
+------------------------------------------------------------------------------------------
+  OS=Debian GNU/Linux 13 (trixie)
+  VNX executed as root
+  xhost +SI:localuser:root executed 
+  CONF file: /etc/vnx.conf
+  IPv6 enabled: yes
+  TMP dir=/tmp
+  VNX dir=/mnt/tmp/ce.aparicio/.vnx
+  INPUT file: k8s_lab-calico.xml
+  KVM acceleration supported
+  KVM nested virtualization supported
+------------------------------------------------------------------------------------------
+Defining virtual machine 'k8s-master' of type 'libvirt-kvm-linux'...
+...OK
+Defining virtual machine 'k8s-worker1' of type 'libvirt-kvm-linux'...
+...OK
+Defining virtual machine 'k8s-worker2' of type 'libvirt-kvm-linux'...
+...OK
+Defining virtual machine 'r1' of type 'lxc'...
+...OK
+Starting virtual machine 'k8s-master' of type 'libvirt-kvm-linux'...
+...OK
+Starting virtual machine 'k8s-worker1' of type 'libvirt-kvm-linux'...
+...OK
+Starting virtual machine 'k8s-worker2' of type 'libvirt-kvm-linux'...
+...OK
+Starting virtual machine 'r1' of type 'lxc'...
+...OK
+
+------------------------------------------------------------------------------------------
+ Scenario "k8s_lab-kubeadm" started
+
+ VM_NAME     | TYPE                | CONSOLE ACCESS COMMAND
+-----------------------------------------------------------------------------------------
+ k8s-master  | libvirt-kvm-linux   | con0:  'virt-viewer -a -c qemu:///system k8s-master' or 'vncviewer 127.0.0.1:1'
+             |                     | con1:  'virsh -c qemu:///system console k8s-master' or 'screen /dev/pts/2'
+-----------------------------------------------------------------------------------------
+ k8s-worker1 | libvirt-kvm-linux   | con0:  'virt-viewer -a -c qemu:///system k8s-worker1' or 'vncviewer 127.0.0.1:2'
+             |                     | con1:  'virsh -c qemu:///system console k8s-worker1' or 'screen /dev/pts/4'
+-----------------------------------------------------------------------------------------
+ k8s-worker2 | libvirt-kvm-linux   | con0:  'virt-viewer -a -c qemu:///system k8s-worker2' or 'vncviewer 127.0.0.1:3'
+             |                     | con1:  'virsh -c qemu:///system console k8s-worker2' or 'screen /dev/pts/6'
+-----------------------------------------------------------------------------------------
+ r1          | lxc                 | con0:  'lxc-console -n r1'
+             |                     | con1:  'lxc-console -n r1'
+-----------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------------
+Total time elapsed: 25 seconds
+------------------------------------------------------------------------------------------
+--
+-- Waiting for k8s-master node to be ready ....
+--
+-- k8s-master node ready:
+Warning: Permanently added 'k8s-master' (ED25519) to the list of known hosts.
+no such identity: /mnt/tmp/k8s_lab-flannel-v02/conf/ssh/id_rsa: No such file or directory
+NAME         STATUS   ROLES           AGE   VERSION
+k8s-master   Ready    control-plane   58d   v1.37.0
+--
+-- Joining worker nodes (k8s-worker1 & k8s-worker2) to the cluster:
+--
+localuser:root being added to access control list
+
+------------------------------------------------------------------------------------------
+Virtual Networks over LinuX (VNX) -- http://www.dit.upm.es/vnx - vnx@dit.upm.es
+Version: 2.0b.6877 (built on 20/09/2026_23:36)
+------------------------------------------------------------------------------------------
+  OS=Debian GNU/Linux 13 (trixie)
+  VNX executed as root
+  xhost +SI:localuser:root executed 
+  CONF file: /etc/vnx.conf
+  IPv6 enabled: yes
+  TMP dir=/tmp
+  VNX dir=/mnt/tmp/ce.aparicio/.vnx
+  INPUT file: k8s_lab-calico.xml
+  KVM acceleration supported
+  KVM nested virtualization supported
+------------------------------------------------------------------------------------------
+Calling execute_cmd for vm 'k8s-master' with seq 'start-all'...
+exeCommand sent to VM k8s-master
+** exeCommand sdisk
+** OK
+...execute_cmd for vm 'k8s-master' with seq 'start-all' returns OK
+------------------------------------------------------------------------------------------
+Total time elapsed: 32 seconds
+------------------------------------------------------------------------------------------
+Warning: Permanently added 'k8s-master' (ED25519) to the list of known hosts.
+no such identity: /mnt/tmp/k8s_lab-flannel-v02/conf/ssh/id_rsa: No such file or directory
+NAME          STATUS   ROLES           AGE   VERSION
+k8s-master    Ready    control-plane   58d   v1.37.0
+k8s-worker1   Ready    <none>          14s   v1.37.0
+k8s-worker2   Ready    <none>          9s    v1.37.0
+--
+-- Loading MetalLB configuration:
+--
+localuser:root being added to access control list
+
+------------------------------------------------------------------------------------------
+Virtual Networks over LinuX (VNX) -- http://www.dit.upm.es/vnx - vnx@dit.upm.es
+Version: 2.0b.6877 (built on 20/09/2026_23:36)
+------------------------------------------------------------------------------------------
+  OS=Debian GNU/Linux 13 (trixie)
+  VNX executed as root
+  xhost +SI:localuser:root executed 
+  CONF file: /etc/vnx.conf
+  IPv6 enabled: yes
+  TMP dir=/tmp
+  VNX dir=/mnt/tmp/ce.aparicio/.vnx
+  INPUT file: k8s_lab-calico.xml
+  KVM acceleration supported
+  KVM nested virtualization supported
+------------------------------------------------------------------------------------------
+Calling execute_cmd for vm 'k8s-master' with seq 'config_metallb'...
+exeCommand sent to VM k8s-master
+** exeCommand sdisk
+** OK
+...execute_cmd for vm 'k8s-master' with seq 'config_metallb' returns OK
+------------------------------------------------------------------------------------------
+Total time elapsed: 94 seconds
+------------------------------------------------------------------------------------------
+Warning: Permanently added 'k8s-master' (ED25519) to the list of known hosts.
+no such identity: /mnt/tmp/k8s_lab-flannel-v02/conf/ssh/id_rsa: No such file or directory
+NAME           AUTO ASSIGN   AVOID BUGGY IPS   ADDRESSES
+default-pool   true          false             ["10.10.10.20-10.10.10.30"]
+Warning: Permanently added 'k8s-master' (ED25519) to the list of known hosts.
+no such identity: /mnt/tmp/k8s_lab-flannel-v02/conf/ssh/id_rsa: No such file or directory
+NAME                       IPADDRESSPOOLS     IPADDRESSPOOL SELECTORS   INTERFACES
+default-l2-advertisement   ["default-pool"]                             
+--
+-- K8s Calico virtual laboratory started in 185 seconds
+--
+Warning: Permanently added 'k8s-master' (ED25519) to the list of known hosts.
+no such identity: /mnt/tmp/k8s_lab-flannel-v02/conf/ssh/id_rsa: No such file or directory
+config                                                                                                                                   100% 5635     2.8MB/s   00:00    
+node/k8s-master condition met
+node/k8s-worker1 condition met
+node/k8s-worker2 condition met
+pod/ingress-nginx-controller-8464654b6c-pwn7w condition met
+localuser:root being added to access control list
+
+------------------------------------------------------------------------------------------
+Virtual Networks over LinuX (VNX) -- http://www.dit.upm.es/vnx - vnx@dit.upm.es
+Version: 2.0b.6877 (built on 20/09/2026_23:36)
+------------------------------------------------------------------------------------------
+  OS=Debian GNU/Linux 13 (trixie)
+  VNX executed as root
+  xhost +SI:localuser:root executed 
+  CONF file: /etc/vnx.conf
+  IPv6 enabled: yes
+  TMP dir=/tmp
+  VNX dir=/mnt/tmp/ce.aparicio/.vnx
+  INPUT file: k8s_lab-terraform.xml
+------------------------------------------------------------------------------------------
+Defining virtual machine 'terraform' of type 'lxc'...
+...OK
+Starting virtual machine 'terraform' of type 'lxc'...
+...OK
+Calling execute_cmd for vm 'terraform' with seq 'on_boot'...
+...execute_cmd for vm 'terraform' with seq 'on_boot' returns OK
+
+------------------------------------------------------------------------------------------
+ Scenario "k8s_lab-terraform" started
+
+ VM_NAME     | TYPE                | CONSOLE ACCESS COMMAND
+-----------------------------------------------------------------------------------------
+ terraform   | lxc                 | con0:  'lxc-console -n terraform'
+             |                     | con1:  'lxc-console -n terraform'
+-----------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------------
+Total time elapsed: 2 seconds
+------------------------------------------------------------------------------------------
+localuser:root being added to access control list
+
+------------------------------------------------------------------------------------------
+Virtual Networks over LinuX (VNX) -- http://www.dit.upm.es/vnx - vnx@dit.upm.es
+Version: 2.0b.6877 (built on 20/09/2026_23:36)
+------------------------------------------------------------------------------------------
+  OS=Debian GNU/Linux 13 (trixie)
+  VNX executed as root
+  xhost +SI:localuser:root executed 
+  CONF file: /etc/vnx.conf
+  IPv6 enabled: yes
+  TMP dir=/tmp
+  VNX dir=/mnt/tmp/ce.aparicio/.vnx
+  INPUT file: k8s_lab-terraform.xml
+------------------------------------------------------------------------------------------
+Calling execute_cmd for vm 'terraform' with seq 'install-terraform'...
+debconf: no se pudo inicializar la interfaz: Dialog
+debconf: (La interfaz «dialog» no funcionará en un terminal tonto, un búfer de intérprete de órdenes de emacs, o sin una terminal controladora.)
+debconf: probando ahora la interfaz: Readline
+Extrayendo plantillas para los paquetes: 100%
+--2026-11-18 16:08:47--  https://apt.releases.hashicorp.com/gpg
+Resolving apt.releases.hashicorp.com (apt.releases.hashicorp.com)... 3.174.170.72, 3.174.170.114, 3.174.170.128, ...
+Connecting to apt.releases.hashicorp.com (apt.releases.hashicorp.com)|3.174.170.72|:443... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: 1725 (1.7K) [application/x-www-form-urlencoded]
+Saving to: 'STDOUT'
+
+-                                          100%[=======================================================================================>]   1.68K  --.-KB/s    in 0s      
+
+2026-11-18 16:08:47 (2.05 GB/s) - written to stdout [1725/1725]
+
+gpg: directory '/root/.gnupg' created
+gpg: /root/.gnupg/trustdb.gpg: trustdb created
+debconf: no se pudo inicializar la interfaz: Dialog
+debconf: (La interfaz «dialog» no funcionará en un terminal tonto, un búfer de intérprete de órdenes de emacs, o sin una terminal controladora.)
+debconf: probando ahora la interfaz: Readline
+---
+PING www.dit.upm.es (138.4.2.56) 56(84) bytes of data.
+64 bytes from www.dit.upm.es (138.4.2.56): icmp_seq=1 ttl=61 time=0.751 ms
+64 bytes from www.dit.upm.es (138.4.2.56): icmp_seq=2 ttl=61 time=0.463 ms
+64 bytes from www.dit.upm.es (138.4.2.56): icmp_seq=3 ttl=61 time=0.795 ms
+
+--- www.dit.upm.es ping statistics ---
+3 packets transmitted, 3 received, 0% packet loss, time 2002ms
+rtt min/avg/max/mdev = 0.463/0.669/0.795/0.147 ms
+Obj:1 http://archive.ubuntu.com/ubuntu jammy InRelease
+Des:2 http://security.ubuntu.com/ubuntu jammy-security InRelease [129 kB]
+Des:3 http://archive.ubuntu.com/ubuntu jammy-updates InRelease [128 kB]
+Des:4 http://security.ubuntu.com/ubuntu jammy-security/main amd64 Packages [3.718 kB]
+Des:5 http://security.ubuntu.com/ubuntu jammy-security/main Translation-en [519 kB]
+Des:6 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 Packages [3.986 kB]
+Des:7 http://archive.ubuntu.com/ubuntu jammy-updates/main Translation-en [585 kB]
+Des:8 http://security.ubuntu.com/ubuntu jammy-security/restricted amd64 Packages [6.613 kB]
+Des:9 http://security.ubuntu.com/ubuntu jammy-security/restricted Translation-en [1.272 kB]
+Des:10 http://archive.ubuntu.com/ubuntu jammy-updates/restricted amd64 Packages [6.848 kB]
+Des:11 http://security.ubuntu.com/ubuntu jammy-security/universe amd64 Packages [1.057 kB]
+Des:12 http://security.ubuntu.com/ubuntu jammy-security/universe Translation-en [238 kB]
+Des:13 http://security.ubuntu.com/ubuntu jammy-security/multiverse amd64 Packages [79,6 kB]
+Des:14 http://archive.ubuntu.com/ubuntu jammy-updates/restricted Translation-en [1.317 kB]
+Des:15 http://security.ubuntu.com/ubuntu jammy-security/multiverse Translation-en [13,6 kB]
+Des:16 http://archive.ubuntu.com/ubuntu jammy-updates/universe amd64 Packages [1.290 kB]
+Des:17 http://archive.ubuntu.com/ubuntu jammy-updates/universe Translation-en [326 kB]
+Des:18 http://archive.ubuntu.com/ubuntu jammy-updates/multiverse amd64 Packages [86,1 kB]
+Des:19 http://archive.ubuntu.com/ubuntu jammy-updates/multiverse Translation-en [16,5 kB]
+Descargados 28,2 MB en 6s (4.420 kB/s)
+Leyendo lista de paquetes...
+Leyendo lista de paquetes...
+Creando árbol de dependencias...
+Leyendo la información de estado...
+Se instalarán los siguientes paquetes adicionales:
+  dirmngr distro-info-data gir1.2-packagekitglib-1.0 gnupg-l10n gnupg-utils
+  gpg gpg-agent gpg-wks-client gpg-wks-server gpgconf gpgsm gpgv libappstream4
+  libassuan0 libcurl3-gnutls libcurl4 libdw1 libelf1 libglib2.0-0
+  libglib2.0-bin libgstreamer1.0-0 libksba8 libnpth0 libpackagekit-glib2-18
+  libpolkit-agent-1-0 libpolkit-gobject-1-0 libstemmer0d libunwind8 libxmlb2
+  packagekit packagekit-tools pinentry-curses pkexec policykit-1 polkitd
+  python3-blinker python3-cffi-backend python3-cryptography python3-distro
+  python3-distro-info python3-httplib2 python3-importlib-metadata
+  python3-jeepney python3-jwt python3-keyring python3-launchpadlib
+  python3-lazr.restfulclient python3-lazr.uri python3-more-itertools
+  python3-oauthlib python3-pyparsing python3-secretstorage python3-six
+  python3-software-properties python3-wadllib python3-zipp unattended-upgrades
+Paquetes sugeridos:
+  dbus-user-session pinentry-gnome3 tor parcimonie xloadimage scdaemon
+  gstreamer1.0-tools appstream pinentry-doc python-blinker-doc
+  python-cryptography-doc python3-cryptography-vectors python3-crypto
+  gir1.2-secret-1 gnome-keyring libkf5wallet-bin python3-keyrings.alt
+  python3-testresources python-pyparsing-doc python-secretstorage-doc
+  bsd-mailx default-mta | mail-transport-agent needrestart powermgmt-base
+Se instalarán los siguientes paquetes NUEVOS:
+  curl dirmngr gir1.2-packagekitglib-1.0 gnupg gnupg-l10n gnupg-utils gpg
+  gpg-agent gpg-wks-client gpg-wks-server gpgconf gpgsm libappstream4
+  libassuan0 libcurl3-gnutls libdw1 libglib2.0-bin libgstreamer1.0-0 libksba8
+  libnpth0 libpackagekit-glib2-18 libpolkit-agent-1-0 libpolkit-gobject-1-0
+  libstemmer0d libunwind8 libxmlb2 packagekit packagekit-tools pinentry-curses
+  pkexec policykit-1 polkitd python3-blinker python3-cffi-backend
+  python3-cryptography python3-distro python3-distro-info python3-httplib2
+  python3-importlib-metadata python3-jeepney python3-jwt python3-keyring
+  python3-launchpadlib python3-lazr.restfulclient python3-lazr.uri
+  python3-more-itertools python3-oauthlib python3-pyparsing
+  python3-secretstorage python3-six python3-software-properties
+  python3-wadllib python3-zipp software-properties-common unattended-upgrades
+Se actualizarán los siguientes paquetes:
+  distro-info-data gpgv libcurl4 libelf1 libglib2.0-0
+5 actualizados, 55 nuevos se instalarán, 0 para eliminar y 151 no actualizados.
+Se necesita descargar 8.363 kB de archivos.
+Se utilizarán 23,6 MB de espacio de disco adicional después de esta operación.
+Des:1 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 gpgv amd64 2.2.27-3ubuntu2.5 [137 kB]
+Des:2 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 distro-info-data all 2026.10.12-0ubuntu0.22.04.1 [6.016 B]
+Des:3 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libelf1 amd64 0.186-1ubuntu0.1 [51,1 kB]
+Des:4 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libglib2.0-0 amd64 2.72.4-0ubuntu2.11 [1.469 kB]
+Des:5 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 python3-distro-info all 1.1ubuntu0.3 [6.746 B]
+Des:6 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libcurl4 amd64 7.81.0-1ubuntu1.30 [293 kB]
+Des:7 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 curl amd64 7.81.0-1ubuntu1.30 [194 kB]
+Des:8 http://archive.ubuntu.com/ubuntu jammy/main amd64 libassuan0 amd64 2.5.5-1build1 [38,2 kB]
+Des:9 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 gpgconf amd64 2.2.27-3ubuntu2.5 [94,3 kB]
+Des:10 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libksba8 amd64 1.6.0-2ubuntu0.2 [119 kB]
+Des:11 http://archive.ubuntu.com/ubuntu jammy/main amd64 libnpth0 amd64 1.6-3build2 [8.664 B]
+Des:12 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 dirmngr amd64 2.2.27-3ubuntu2.5 [293 kB]
+Des:13 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libpackagekit-glib2-18 amd64 1.2.5-2ubuntu3.1 [124 kB]
+Des:14 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 gir1.2-packagekitglib-1.0 amd64 1.2.5-2ubuntu3.1 [25,3 kB]
+Des:15 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 gnupg-l10n all 2.2.27-3ubuntu2.5 [54,5 kB]
+Des:16 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 gnupg-utils amd64 2.2.27-3ubuntu2.5 [309 kB]
+Des:17 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 gpg amd64 2.2.27-3ubuntu2.5 [519 kB]
+Des:18 http://archive.ubuntu.com/ubuntu jammy/main amd64 pinentry-curses amd64 1.1.1-1build2 [34,4 kB]
+Des:19 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 gpg-agent amd64 2.2.27-3ubuntu2.5 [209 kB]
+Des:20 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 gpg-wks-client amd64 2.2.27-3ubuntu2.5 [62,7 kB]
+Des:21 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 gpg-wks-server amd64 2.2.27-3ubuntu2.5 [57,6 kB]
+Des:22 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 gpgsm amd64 2.2.27-3ubuntu2.5 [197 kB]
+Des:23 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 gnupg all 2.2.27-3ubuntu2.5 [315 kB]
+Des:24 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libcurl3-gnutls amd64 7.81.0-1ubuntu1.30 [287 kB]
+Des:25 http://archive.ubuntu.com/ubuntu jammy/main amd64 libstemmer0d amd64 2.2.0-1build1 [165 kB]
+Des:26 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libxmlb2 amd64 0.3.24-1~ubuntu0.22.04.1 [67,9 kB]
+Des:27 http://archive.ubuntu.com/ubuntu jammy/main amd64 libappstream4 amd64 0.15.2-2 [192 kB]
+Des:28 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libdw1 amd64 0.186-1ubuntu0.1 [251 kB]
+Des:29 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libglib2.0-bin amd64 2.72.4-0ubuntu2.11 [80,8 kB]
+Des:30 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libunwind8 amd64 1.3.2-2build2.1 [54,5 kB]
+Des:31 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libgstreamer1.0-0 amd64 1.20.3-0ubuntu1.1 [984 kB]
+Des:32 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libpolkit-gobject-1-0 amd64 0.105-33ubuntu0.2 [41,9 kB]
+Des:33 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 libpolkit-agent-1-0 amd64 0.105-33ubuntu0.2 [16,8 kB]
+Des:34 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 polkitd amd64 0.105-33ubuntu0.2 [80,2 kB]
+Des:35 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 pkexec amd64 0.105-33ubuntu0.2 [15,1 kB]
+Des:36 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 policykit-1 amd64 0.105-33ubuntu0.2 [2.440 B]
+Des:37 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 packagekit amd64 1.2.5-2ubuntu3.1 [442 kB]
+Des:38 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 packagekit-tools amd64 1.2.5-2ubuntu3.1 [28,8 kB]
+Des:39 http://archive.ubuntu.com/ubuntu jammy/main amd64 python3-blinker all 1.4+dfsg1-0.4 [14,0 kB]
+Des:40 http://archive.ubuntu.com/ubuntu jammy/main amd64 python3-cffi-backend amd64 1.15.0-1build2 [77,4 kB]
+Des:41 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 python3-cryptography amd64 3.4.8-1ubuntu2.4 [236 kB]
+Des:42 http://archive.ubuntu.com/ubuntu jammy/main amd64 python3-pyparsing all 2.4.7-1 [61,4 kB]
+Des:43 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 python3-httplib2 all 0.20.2-2ubuntu0.1 [33,4 kB]
+Des:44 http://archive.ubuntu.com/ubuntu jammy/main amd64 python3-more-itertools all 8.10.0-2 [47,9 kB]
+Des:45 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 python3-zipp all 1.0.0-3ubuntu0.1 [6.288 B]
+Des:46 http://archive.ubuntu.com/ubuntu jammy/main amd64 python3-importlib-metadata all 4.6.4-1 [16,2 kB]
+Des:47 http://archive.ubuntu.com/ubuntu jammy/main amd64 python3-jeepney all 0.7.1-3 [36,8 kB]
+Des:48 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 python3-jwt all 2.3.0-1ubuntu0.6 [19,7 kB]
+Des:49 http://archive.ubuntu.com/ubuntu jammy/main amd64 python3-secretstorage all 3.3.1-1 [13,2 kB]
+Des:50 http://archive.ubuntu.com/ubuntu jammy/main amd64 python3-keyring all 23.5.0-1 [35,7 kB]
+Des:51 http://archive.ubuntu.com/ubuntu jammy/main amd64 python3-lazr.uri all 1.0.6-2 [14,4 kB]
+Des:52 http://archive.ubuntu.com/ubuntu jammy/main amd64 python3-wadllib all 1.3.6-1 [36,4 kB]
+Des:53 http://archive.ubuntu.com/ubuntu jammy/main amd64 python3-distro all 1.7.0-1 [17,0 kB]
+Des:54 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 python3-oauthlib all 3.2.0-1ubuntu0.1 [89,9 kB]
+Des:55 http://archive.ubuntu.com/ubuntu jammy/main amd64 python3-six all 1.16.0-3ubuntu1 [12,6 kB]
+Des:56 http://archive.ubuntu.com/ubuntu jammy/main amd64 python3-lazr.restfulclient all 0.14.4-1 [51,2 kB]
+Des:57 http://archive.ubuntu.com/ubuntu jammy/main amd64 python3-launchpadlib all 1.10.16-1 [125 kB]
+Des:58 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 python3-software-properties all 0.99.22.9 [28,8 kB]
+Des:59 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 software-properties-common all 0.99.22.9 [14,1 kB]
+Des:60 http://archive.ubuntu.com/ubuntu jammy/main amd64 unattended-upgrades all 2.8ubuntu1 [49,4 kB]
+Preconfigurando paquetes ...
+Descargados 8.363 kB en 9s (936 kB/s)
+(Leyendo la base de datos ... 20152 ficheros o directorios instalados actualmente.)
+Preparando para desempaquetar .../gpgv_2.2.27-3ubuntu2.5_amd64.deb ...
+Desempaquetando gpgv (2.2.27-3ubuntu2.5) sobre (2.2.27-3ubuntu2.1) ...
+Configurando gpgv (2.2.27-3ubuntu2.5) ...
+(Leyendo la base de datos ... 20152 ficheros o directorios instalados actualmente.)
+Preparando para desempaquetar .../00-distro-info-data_2026.10.12-0ubuntu0.22.04.1_all.deb ...
+Desempaquetando distro-info-data (2026.10.12-0ubuntu0.22.04.1) sobre (0.52ubuntu0.2) ...
+Preparando para desempaquetar .../01-libelf1_0.186-1ubuntu0.1_amd64.deb ...
+Desempaquetando libelf1:amd64 (0.186-1ubuntu0.1) sobre (0.186-1build1) ...
+Preparando para desempaquetar .../02-libglib2.0-0_2.72.4-0ubuntu2.11_amd64.deb ...
+Desempaquetando libglib2.0-0:amd64 (2.72.4-0ubuntu2.11) sobre (2.72.4-0ubuntu1) ...
+Seleccionando el paquete python3-distro-info previamente no seleccionado.
+Preparando para desempaquetar .../03-python3-distro-info_1.1ubuntu0.3_all.deb ...
+Desempaquetando python3-distro-info (1.1ubuntu0.3) ...
+Preparando para desempaquetar .../04-libcurl4_7.81.0-1ubuntu1.30_amd64.deb ...
+Desempaquetando libcurl4:amd64 (7.81.0-1ubuntu1.30) sobre (7.81.0-1ubuntu1.10) ...
+Seleccionando el paquete curl previamente no seleccionado.
+Preparando para desempaquetar .../05-curl_7.81.0-1ubuntu1.30_amd64.deb ...
+Desempaquetando curl (7.81.0-1ubuntu1.30) ...
+Seleccionando el paquete libassuan0:amd64 previamente no seleccionado.
+Preparando para desempaquetar .../06-libassuan0_2.5.5-1build1_amd64.deb ...
+Desempaquetando libassuan0:amd64 (2.5.5-1build1) ...
+Seleccionando el paquete gpgconf previamente no seleccionado.
+Preparando para desempaquetar .../07-gpgconf_2.2.27-3ubuntu2.5_amd64.deb ...
+Desempaquetando gpgconf (2.2.27-3ubuntu2.5) ...
+Seleccionando el paquete libksba8:amd64 previamente no seleccionado.
+Preparando para desempaquetar .../08-libksba8_1.6.0-2ubuntu0.2_amd64.deb ...
+Desempaquetando libksba8:amd64 (1.6.0-2ubuntu0.2) ...
+Seleccionando el paquete libnpth0:amd64 previamente no seleccionado.
+Preparando para desempaquetar .../09-libnpth0_1.6-3build2_amd64.deb ...
+Desempaquetando libnpth0:amd64 (1.6-3build2) ...
+Seleccionando el paquete dirmngr previamente no seleccionado.
+Preparando para desempaquetar .../10-dirmngr_2.2.27-3ubuntu2.5_amd64.deb ...
+Desempaquetando dirmngr (2.2.27-3ubuntu2.5) ...
+Seleccionando el paquete libpackagekit-glib2-18:amd64 previamente no seleccionado.
+Preparando para desempaquetar .../11-libpackagekit-glib2-18_1.2.5-2ubuntu3.1_amd64.deb ...
+Desempaquetando libpackagekit-glib2-18:amd64 (1.2.5-2ubuntu3.1) ...
+Seleccionando el paquete gir1.2-packagekitglib-1.0 previamente no seleccionado.
+Preparando para desempaquetar .../12-gir1.2-packagekitglib-1.0_1.2.5-2ubuntu3.1_amd64.deb ...
+Desempaquetando gir1.2-packagekitglib-1.0 (1.2.5-2ubuntu3.1) ...
+Seleccionando el paquete gnupg-l10n previamente no seleccionado.
+Preparando para desempaquetar .../13-gnupg-l10n_2.2.27-3ubuntu2.5_all.deb ...
+Desempaquetando gnupg-l10n (2.2.27-3ubuntu2.5) ...
+Seleccionando el paquete gnupg-utils previamente no seleccionado.
+Preparando para desempaquetar .../14-gnupg-utils_2.2.27-3ubuntu2.5_amd64.deb ...
+Desempaquetando gnupg-utils (2.2.27-3ubuntu2.5) ...
+Seleccionando el paquete gpg previamente no seleccionado.
+Preparando para desempaquetar .../15-gpg_2.2.27-3ubuntu2.5_amd64.deb ...
+Desempaquetando gpg (2.2.27-3ubuntu2.5) ...
+Seleccionando el paquete pinentry-curses previamente no seleccionado.
+Preparando para desempaquetar .../16-pinentry-curses_1.1.1-1build2_amd64.deb ...
+Desempaquetando pinentry-curses (1.1.1-1build2) ...
+Seleccionando el paquete gpg-agent previamente no seleccionado.
+Preparando para desempaquetar .../17-gpg-agent_2.2.27-3ubuntu2.5_amd64.deb ...
+Desempaquetando gpg-agent (2.2.27-3ubuntu2.5) ...
+Seleccionando el paquete gpg-wks-client previamente no seleccionado.
+Preparando para desempaquetar .../18-gpg-wks-client_2.2.27-3ubuntu2.5_amd64.deb ...
+Desempaquetando gpg-wks-client (2.2.27-3ubuntu2.5) ...
+Seleccionando el paquete gpg-wks-server previamente no seleccionado.
+Preparando para desempaquetar .../19-gpg-wks-server_2.2.27-3ubuntu2.5_amd64.deb ...
+Desempaquetando gpg-wks-server (2.2.27-3ubuntu2.5) ...
+Seleccionando el paquete gpgsm previamente no seleccionado.
+Preparando para desempaquetar .../20-gpgsm_2.2.27-3ubuntu2.5_amd64.deb ...
+Desempaquetando gpgsm (2.2.27-3ubuntu2.5) ...
+Seleccionando el paquete gnupg previamente no seleccionado.
+Preparando para desempaquetar .../21-gnupg_2.2.27-3ubuntu2.5_all.deb ...
+Desempaquetando gnupg (2.2.27-3ubuntu2.5) ...
+Seleccionando el paquete libcurl3-gnutls:amd64 previamente no seleccionado.
+Preparando para desempaquetar .../22-libcurl3-gnutls_7.81.0-1ubuntu1.30_amd64.deb ...
+Desempaquetando libcurl3-gnutls:amd64 (7.81.0-1ubuntu1.30) ...
+Seleccionando el paquete libstemmer0d:amd64 previamente no seleccionado.
+Preparando para desempaquetar .../23-libstemmer0d_2.2.0-1build1_amd64.deb ...
+Desempaquetando libstemmer0d:amd64 (2.2.0-1build1) ...
+Seleccionando el paquete libxmlb2:amd64 previamente no seleccionado.
+Preparando para desempaquetar .../24-libxmlb2_0.3.24-1~ubuntu0.22.04.1_amd64.deb ...
+Desempaquetando libxmlb2:amd64 (0.3.24-1~ubuntu0.22.04.1) ...
+Seleccionando el paquete libappstream4:amd64 previamente no seleccionado.
+Preparando para desempaquetar .../25-libappstream4_0.15.2-2_amd64.deb ...
+Desempaquetando libappstream4:amd64 (0.15.2-2) ...
+Seleccionando el paquete libdw1:amd64 previamente no seleccionado.
+Preparando para desempaquetar .../26-libdw1_0.186-1ubuntu0.1_amd64.deb ...
+Desempaquetando libdw1:amd64 (0.186-1ubuntu0.1) ...
+Seleccionando el paquete libglib2.0-bin previamente no seleccionado.
+Preparando para desempaquetar .../27-libglib2.0-bin_2.72.4-0ubuntu2.11_amd64.deb ...
+Desempaquetando libglib2.0-bin (2.72.4-0ubuntu2.11) ...
+Seleccionando el paquete libunwind8:amd64 previamente no seleccionado.
+Preparando para desempaquetar .../28-libunwind8_1.3.2-2build2.1_amd64.deb ...
+Desempaquetando libunwind8:amd64 (1.3.2-2build2.1) ...
+Seleccionando el paquete libgstreamer1.0-0:amd64 previamente no seleccionado.
+Preparando para desempaquetar .../29-libgstreamer1.0-0_1.20.3-0ubuntu1.1_amd64.deb ...
+Desempaquetando libgstreamer1.0-0:amd64 (1.20.3-0ubuntu1.1) ...
+Seleccionando el paquete libpolkit-gobject-1-0:amd64 previamente no seleccionado.
+Preparando para desempaquetar .../30-libpolkit-gobject-1-0_0.105-33ubuntu0.2_amd64.deb ...
+Desempaquetando libpolkit-gobject-1-0:amd64 (0.105-33ubuntu0.2) ...
+Seleccionando el paquete libpolkit-agent-1-0:amd64 previamente no seleccionado.
+Preparando para desempaquetar .../31-libpolkit-agent-1-0_0.105-33ubuntu0.2_amd64.deb ...
+Desempaquetando libpolkit-agent-1-0:amd64 (0.105-33ubuntu0.2) ...
+Seleccionando el paquete polkitd previamente no seleccionado.
+Preparando para desempaquetar .../32-polkitd_0.105-33ubuntu0.2_amd64.deb ...
+Desempaquetando polkitd (0.105-33ubuntu0.2) ...
+Seleccionando el paquete pkexec previamente no seleccionado.
+Preparando para desempaquetar .../33-pkexec_0.105-33ubuntu0.2_amd64.deb ...
+Desempaquetando pkexec (0.105-33ubuntu0.2) ...
+Seleccionando el paquete policykit-1 previamente no seleccionado.
+Preparando para desempaquetar .../34-policykit-1_0.105-33ubuntu0.2_amd64.deb ...
+Desempaquetando policykit-1 (0.105-33ubuntu0.2) ...
+Seleccionando el paquete packagekit previamente no seleccionado.
+Preparando para desempaquetar .../35-packagekit_1.2.5-2ubuntu3.1_amd64.deb ...
+Desempaquetando packagekit (1.2.5-2ubuntu3.1) ...
+Seleccionando el paquete packagekit-tools previamente no seleccionado.
+Preparando para desempaquetar .../36-packagekit-tools_1.2.5-2ubuntu3.1_amd64.deb ...
+Desempaquetando packagekit-tools (1.2.5-2ubuntu3.1) ...
+Seleccionando el paquete python3-blinker previamente no seleccionado.
+Preparando para desempaquetar .../37-python3-blinker_1.4+dfsg1-0.4_all.deb ...
+Desempaquetando python3-blinker (1.4+dfsg1-0.4) ...
+Seleccionando el paquete python3-cffi-backend:amd64 previamente no seleccionado.
+Preparando para desempaquetar .../38-python3-cffi-backend_1.15.0-1build2_amd64.deb ...
+Desempaquetando python3-cffi-backend:amd64 (1.15.0-1build2) ...
+Seleccionando el paquete python3-cryptography previamente no seleccionado.
+Preparando para desempaquetar .../39-python3-cryptography_3.4.8-1ubuntu2.4_amd64.deb ...
+Desempaquetando python3-cryptography (3.4.8-1ubuntu2.4) ...
+Seleccionando el paquete python3-pyparsing previamente no seleccionado.
+Preparando para desempaquetar .../40-python3-pyparsing_2.4.7-1_all.deb ...
+Desempaquetando python3-pyparsing (2.4.7-1) ...
+Seleccionando el paquete python3-httplib2 previamente no seleccionado.
+Preparando para desempaquetar .../41-python3-httplib2_0.20.2-2ubuntu0.1_all.deb ...
+Desempaquetando python3-httplib2 (0.20.2-2ubuntu0.1) ...
+Seleccionando el paquete python3-more-itertools previamente no seleccionado.
+Preparando para desempaquetar .../42-python3-more-itertools_8.10.0-2_all.deb ...
+Desempaquetando python3-more-itertools (8.10.0-2) ...
+Seleccionando el paquete python3-zipp previamente no seleccionado.
+Preparando para desempaquetar .../43-python3-zipp_1.0.0-3ubuntu0.1_all.deb ...
+Desempaquetando python3-zipp (1.0.0-3ubuntu0.1) ...
+Seleccionando el paquete python3-importlib-metadata previamente no seleccionado.
+Preparando para desempaquetar .../44-python3-importlib-metadata_4.6.4-1_all.deb ...
+Desempaquetando python3-importlib-metadata (4.6.4-1) ...
+Seleccionando el paquete python3-jeepney previamente no seleccionado.
+Preparando para desempaquetar .../45-python3-jeepney_0.7.1-3_all.deb ...
+Desempaquetando python3-jeepney (0.7.1-3) ...
+Seleccionando el paquete python3-jwt previamente no seleccionado.
+Preparando para desempaquetar .../46-python3-jwt_2.3.0-1ubuntu0.6_all.deb ...
+Desempaquetando python3-jwt (2.3.0-1ubuntu0.6) ...
+Seleccionando el paquete python3-secretstorage previamente no seleccionado.
+Preparando para desempaquetar .../47-python3-secretstorage_3.3.1-1_all.deb ...
+Desempaquetando python3-secretstorage (3.3.1-1) ...
+Seleccionando el paquete python3-keyring previamente no seleccionado.
+Preparando para desempaquetar .../48-python3-keyring_23.5.0-1_all.deb ...
+Desempaquetando python3-keyring (23.5.0-1) ...
+Seleccionando el paquete python3-lazr.uri previamente no seleccionado.
+Preparando para desempaquetar .../49-python3-lazr.uri_1.0.6-2_all.deb ...
+Desempaquetando python3-lazr.uri (1.0.6-2) ...
+Seleccionando el paquete python3-wadllib previamente no seleccionado.
+Preparando para desempaquetar .../50-python3-wadllib_1.3.6-1_all.deb ...
+Desempaquetando python3-wadllib (1.3.6-1) ...
+Seleccionando el paquete python3-distro previamente no seleccionado.
+Preparando para desempaquetar .../51-python3-distro_1.7.0-1_all.deb ...
+Desempaquetando python3-distro (1.7.0-1) ...
+Seleccionando el paquete python3-oauthlib previamente no seleccionado.
+Preparando para desempaquetar .../52-python3-oauthlib_3.2.0-1ubuntu0.1_all.deb ...
+Desempaquetando python3-oauthlib (3.2.0-1ubuntu0.1) ...
+Seleccionando el paquete python3-six previamente no seleccionado.
+Preparando para desempaquetar .../53-python3-six_1.16.0-3ubuntu1_all.deb ...
+Desempaquetando python3-six (1.16.0-3ubuntu1) ...
+Seleccionando el paquete python3-lazr.restfulclient previamente no seleccionado.
+Preparando para desempaquetar .../54-python3-lazr.restfulclient_0.14.4-1_all.deb ...
+Desempaquetando python3-lazr.restfulclient (0.14.4-1) ...
+Seleccionando el paquete python3-launchpadlib previamente no seleccionado.
+Preparando para desempaquetar .../55-python3-launchpadlib_1.10.16-1_all.deb ...
+Desempaquetando python3-launchpadlib (1.10.16-1) ...
+Seleccionando el paquete python3-software-properties previamente no seleccionado.
+Preparando para desempaquetar .../56-python3-software-properties_0.99.22.9_all.deb ...
+Desempaquetando python3-software-properties (0.99.22.9) ...
+Seleccionando el paquete software-properties-common previamente no seleccionado.
+Preparando para desempaquetar .../57-software-properties-common_0.99.22.9_all.deb ...
+Desempaquetando software-properties-common (0.99.22.9) ...
+Seleccionando el paquete unattended-upgrades previamente no seleccionado.
+Preparando para desempaquetar .../58-unattended-upgrades_2.8ubuntu1_all.deb ...
+Desempaquetando unattended-upgrades (2.8ubuntu1) ...
+Configurando libksba8:amd64 (1.6.0-2ubuntu0.2) ...
+Configurando python3-more-itertools (8.10.0-2) ...
+Configurando python3-distro (1.7.0-1) ...
+Configurando python3-jwt (2.3.0-1ubuntu0.6) ...
+Configurando libglib2.0-0:amd64 (2.72.4-0ubuntu2.11) ...
+No schema files found: doing nothing.
+Configurando distro-info-data (2026.10.12-0ubuntu0.22.04.1) ...
+Configurando libxmlb2:amd64 (0.3.24-1~ubuntu0.22.04.1) ...
+Configurando libpackagekit-glib2-18:amd64 (1.2.5-2ubuntu3.1) ...
+Configurando libcurl3-gnutls:amd64 (7.81.0-1ubuntu1.30) ...
+Configurando libnpth0:amd64 (1.6-3build2) ...
+Configurando python3-lazr.uri (1.0.6-2) ...
+Configurando libassuan0:amd64 (2.5.5-1build1) ...
+Configurando python3-zipp (1.0.0-3ubuntu0.1) ...
+Configurando libunwind8:amd64 (1.3.2-2build2.1) ...
+Configurando python3-six (1.16.0-3ubuntu1) ...
+Configurando gir1.2-packagekitglib-1.0 (1.2.5-2ubuntu3.1) ...
+Configurando python3-pyparsing (2.4.7-1) ...
+Configurando gnupg-l10n (2.2.27-3ubuntu2.5) ...
+Configurando python3-wadllib (1.3.6-1) ...
+Configurando python3-jeepney (0.7.1-3) ...
+Configurando gpgconf (2.2.27-3ubuntu2.5) ...
+Configurando python3-httplib2 (0.20.2-2ubuntu0.1) ...
+Configurando libcurl4:amd64 (7.81.0-1ubuntu1.30) ...
+Configurando curl (7.81.0-1ubuntu1.30) ...
+Configurando libstemmer0d:amd64 (2.2.0-1build1) ...
+Configurando libelf1:amd64 (0.186-1ubuntu0.1) ...
+Configurando python3-distro-info (1.1ubuntu0.3) ...
+Configurando gpg (2.2.27-3ubuntu2.5) ...
+Configurando libpolkit-gobject-1-0:amd64 (0.105-33ubuntu0.2) ...
+Configurando python3-cffi-backend:amd64 (1.15.0-1build2) ...
+Configurando gnupg-utils (2.2.27-3ubuntu2.5) ...
+Configurando python3-blinker (1.4+dfsg1-0.4) ...
+Configurando pinentry-curses (1.1.1-1build2) ...
+Configurando libdw1:amd64 (0.186-1ubuntu0.1) ...
+Configurando gpg-agent (2.2.27-3ubuntu2.5) ...
+Created symlink /etc/systemd/user/sockets.target.wants/gpg-agent-browser.socket → /usr/lib/systemd/user/gpg-agent-browser.socket.
+Created symlink /etc/systemd/user/sockets.target.wants/gpg-agent-extra.socket → /usr/lib/systemd/user/gpg-agent-extra.socket.
+Created symlink /etc/systemd/user/sockets.target.wants/gpg-agent-ssh.socket → /usr/lib/systemd/user/gpg-agent-ssh.socket.
+Created symlink /etc/systemd/user/sockets.target.wants/gpg-agent.socket → /usr/lib/systemd/user/gpg-agent.socket.
+Configurando python3-importlib-metadata (4.6.4-1) ...
+Configurando gpgsm (2.2.27-3ubuntu2.5) ...
+Configurando libglib2.0-bin (2.72.4-0ubuntu2.11) ...
+Configurando libappstream4:amd64 (0.15.2-2) ...
+Configurando dirmngr (2.2.27-3ubuntu2.5) ...
+Created symlink /etc/systemd/user/sockets.target.wants/dirmngr.socket → /usr/lib/systemd/user/dirmngr.socket.
+Configurando unattended-upgrades (2.8ubuntu1) ...
+debconf: no se pudo inicializar la interfaz: Dialog
+debconf: (La interfaz «dialog» no funcionará en un terminal tonto, un búfer de intérprete de órdenes de emacs, o sin una terminal controladora.)
+debconf: probando ahora la interfaz: Readline
+
+Creating config file /etc/apt/apt.conf.d/20auto-upgrades with new version
+
+Creating config file /etc/apt/apt.conf.d/50unattended-upgrades with new version
+Created symlink /etc/systemd/system/multi-user.target.wants/unattended-upgrades.service → /lib/systemd/system/unattended-upgrades.service.
+Synchronizing state of unattended-upgrades.service with SysV service script with /lib/systemd/systemd-sysv-install.
+Executing: /lib/systemd/systemd-sysv-install enable unattended-upgrades
+Configurando python3-cryptography (3.4.8-1ubuntu2.4) ...
+Configurando gpg-wks-server (2.2.27-3ubuntu2.5) ...
+Configurando libpolkit-agent-1-0:amd64 (0.105-33ubuntu0.2) ...
+Configurando polkitd (0.105-33ubuntu0.2) ...
+Configurando libgstreamer1.0-0:amd64 (1.20.3-0ubuntu1.1) ...
+Setcap worked! gst-ptp-helper is not suid!
+Configurando gpg-wks-client (2.2.27-3ubuntu2.5) ...
+Configurando pkexec (0.105-33ubuntu0.2) ...
+Configurando python3-oauthlib (3.2.0-1ubuntu0.1) ...
+Configurando python3-secretstorage (3.3.1-1) ...
+Configurando gnupg (2.2.27-3ubuntu2.5) ...
+Configurando python3-keyring (23.5.0-1) ...
+Configurando python3-lazr.restfulclient (0.14.4-1) ...
+Configurando policykit-1 (0.105-33ubuntu0.2) ...
+Configurando python3-launchpadlib (1.10.16-1) ...
+Configurando python3-software-properties (0.99.22.9) ...
+Configurando packagekit (1.2.5-2ubuntu3.1) ...
+Created symlink /etc/systemd/user/sockets.target.wants/pk-debconf-helper.socket → /usr/lib/systemd/user/pk-debconf-helper.socket.
+Configurando packagekit-tools (1.2.5-2ubuntu3.1) ...
+Configurando software-properties-common (0.99.22.9) ...
+Procesando disparadores para libc-bin (2.35-0ubuntu3.1) ...
+Procesando disparadores para dbus (1.12.20-2ubuntu4.1) ...
+/usr/share/keyrings/hashicorp-archive-keyring.gpg
+-------------------------------------------------
+pub   rsa4096 2026-09-09 [SC] [expires: 2031-09-08]
+      D55C 0D1A C78A 8D81 26CB  631C FC9C A96A CA02 6560
+uid           [ unknown] HashiCorp Security (HashiCorp Package Signing) <security+packaging@hashicorp.com>
+
+deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com jammy main
+Des:1 https://apt.releases.hashicorp.com jammy InRelease [12,8 kB]
+Obj:2 http://archive.ubuntu.com/ubuntu jammy InRelease
+Des:3 https://apt.releases.hashicorp.com jammy/main amd64 Packages [336 kB]
+Obj:4 http://archive.ubuntu.com/ubuntu jammy-updates InRelease
+Obj:5 http://security.ubuntu.com/ubuntu jammy-security InRelease
+Descargados 349 kB en 31s (11,4 kB/s)
+Leyendo lista de paquetes...
+Leyendo lista de paquetes...
+Creando árbol de dependencias...
+Leyendo la información de estado...
+Se instalarán los siguientes paquetes adicionales:
+  git git-man liberror-perl patch
+Paquetes sugeridos:
+  gettext-base git-daemon-run | git-daemon-sysvinit git-doc git-email git-gui
+  gitk gitweb git-cvs git-mediawiki git-svn ed diffutils-doc
+Se instalarán los siguientes paquetes NUEVOS:
+  git git-man liberror-perl patch terraform
+0 actualizados, 5 nuevos se instalarán, 0 para eliminar y 151 no actualizados.
+Se necesita descargar 41,9 MB de archivos.
+Se utilizarán 151 MB de espacio de disco adicional después de esta operación.
+Des:1 https://apt.releases.hashicorp.com jammy/main amd64 terraform amd64 1.17.2-1 [37,7 MB]
+Des:2 http://archive.ubuntu.com/ubuntu jammy/main amd64 liberror-perl all 0.17029-1 [26,5 kB]
+Des:3 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 git-man all 1:2.34.1-1ubuntu1.18 [954 kB]
+Des:4 http://archive.ubuntu.com/ubuntu jammy-updates/main amd64 git amd64 1:2.34.1-1ubuntu1.18 [3.174 kB]
+Des:5 http://archive.ubuntu.com/ubuntu jammy/main amd64 patch amd64 2.7.6-7build2 [109 kB]
+Descargados 41,9 MB en 1s (35,1 MB/s)
+Seleccionando el paquete liberror-perl previamente no seleccionado.
+(Leyendo la base de datos ... 21251 ficheros o directorios instalados actualmente.)
+Preparando para desempaquetar .../liberror-perl_0.17029-1_all.deb ...
+Desempaquetando liberror-perl (0.17029-1) ...
+Seleccionando el paquete git-man previamente no seleccionado.
+Preparando para desempaquetar .../git-man_1%3a2.34.1-1ubuntu1.18_all.deb ...
+Desempaquetando git-man (1:2.34.1-1ubuntu1.18) ...
+Seleccionando el paquete git previamente no seleccionado.
+Preparando para desempaquetar .../git_1%3a2.34.1-1ubuntu1.18_amd64.deb ...
+Desempaquetando git (1:2.34.1-1ubuntu1.18) ...
+Seleccionando el paquete patch previamente no seleccionado.
+Preparando para desempaquetar .../patch_2.7.6-7build2_amd64.deb ...
+Desempaquetando patch (2.7.6-7build2) ...
+Seleccionando el paquete terraform previamente no seleccionado.
+Preparando para desempaquetar .../terraform_1.17.2-1_amd64.deb ...
+Desempaquetando terraform (1.17.2-1) ...
+Configurando liberror-perl (0.17029-1) ...
+Configurando patch (2.7.6-7build2) ...
+Configurando git-man (1:2.34.1-1ubuntu1.18) ...
+Configurando git (1:2.34.1-1ubuntu1.18) ...
+Configurando terraform (1.17.2-1) ...
+---
+...execute_cmd for vm 'terraform' with seq 'install-terraform' returns OK
+------------------------------------------------------------------------------------------
+Total time elapsed: 207 seconds
+------------------------------------------------------------------------------------------
+Warning: Permanently added 'terraform' (ED25519) to the list of known hosts.
+Warning: Permanently added 'terraform' (ED25519) to the list of known hosts.
+config                                                                                                                                   100% 5635     3.2MB/s   00:00    
+=== PASO 3: Configurar VLAN 1000 (e2.1000) y DHCP CNI en los workers ===
+Warning: Permanently added 'k8s-worker1' (ED25519) to the list of known hosts.
+no such identity: /mnt/tmp/k8s_lab-flannel-v02/conf/ssh/id_rsa: No such file or directory
+Warning: Permanently added 'k8s-worker1' (ED25519) to the list of known hosts.
+no such identity: /mnt/tmp/k8s_lab-flannel-v02/conf/ssh/id_rsa: No such file or directory
+Warning: Permanently added 'k8s-worker1' (ED25519) to the list of known hosts.
+no such identity: /mnt/tmp/k8s_lab-flannel-v02/conf/ssh/id_rsa: No such file or directory
+Warning: Permanently added 'k8s-worker1' (ED25519) to the list of known hosts.
+no such identity: /mnt/tmp/k8s_lab-flannel-v02/conf/ssh/id_rsa: No such file or directory
+
