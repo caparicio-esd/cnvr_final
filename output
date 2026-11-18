@@ -762,3 +762,1003 @@ no such identity: /mnt/tmp/k8s_lab-flannel-v02/conf/ssh/id_rsa: No such file or 
 Warning: Permanently added 'k8s-worker1' (ED25519) to the list of known hosts.
 no such identity: /mnt/tmp/k8s_lab-flannel-v02/conf/ssh/id_rsa: No such file or directory
 
+                  <div class="card">
+                    <span class="badge">CNVR / ARSN 2026-27 &middot; Grupo G__GROUP_NUMBER__</span>
+                    <h1>Aplicaci&oacute;n Web Escalable en Kubernetes</h1>
+                    <p>Respuesta servida din&aacute;micamente a trav&eacute;s de Ingress NGINX y balanceada por Service ClusterIP:</p>
+                    <div class="meta">
+                      <div><span class="key">Pod (Servidor):</span> <span class="val">__POD_NAME__</span></div>
+                      <div><span class="key">Nodo Worker:   </span> <span class="val">__NODE_NAME__</span></div>
+                      <div><span class="key">IP CNI Calico: </span> <span class="val">__POD_IP__</span></div>
+                      <div><span class="key">Ruta Ingress:  </span> <span class="val">/servers-G__GROUP_NUMBER__</span></div>
+                    </div>
+                  </div>
+                </body>
+                </html>
+            EOT
+        }
+      + id   = (known after apply)
+
+      + metadata {
+          + generation       = (known after apply)
+          + labels           = {
+              + "app"        = "web"
+              + "managed-by" = "terraform"
+            }
+          + name             = "web-html-template"
+          + namespace        = "default"
+          + resource_version = (known after apply)
+          + uid              = (known after apply)
+        }
+    }
+
+  # kubernetes_deployment_v1.web will be created
+  + resource "kubernetes_deployment_v1" "web" {
+      + id               = (known after apply)
+      + wait_for_rollout = true
+
+      + metadata {
+          + generation       = (known after apply)
+          + labels           = {
+              + "app"        = "web"
+              + "managed-by" = "terraform"
+            }
+          + name             = "web-deployment"
+          + namespace        = "default"
+          + resource_version = (known after apply)
+          + uid              = (known after apply)
+        }
+
+      + spec {
+          + min_ready_seconds         = 0
+          + paused                    = false
+          + progress_deadline_seconds = 600
+          + replicas                  = "3"
+          + revision_history_limit    = 10
+
+          + selector {
+              + match_labels = {
+                  + "app" = "web"
+                }
+            }
+
+          + strategy (known after apply)
+
+          + template {
+              + metadata {
+                  + annotations      = {
+                      + "cnvr.upm.es/template-hash"   = "4d477d1a3dd5ea9ecdc6ea75f18dc5552a58f75d9e1a2c394c19ed1d31bef52f"
+                      + "k8s.v1.cni.cncf.io/networks" = "vlan1000-dhcp"
+                    }
+                  + generation       = (known after apply)
+                  + labels           = {
+                      + "app"  = "web"
+                      + "role" = "webserver"
+                    }
+                  + name             = (known after apply)
+                  + resource_version = (known after apply)
+                  + uid              = (known after apply)
+                }
+              + spec {
+                  + automount_service_account_token  = true
+                  + dns_policy                       = "ClusterFirst"
+                  + enable_service_links             = true
+                  + host_ipc                         = false
+                  + host_network                     = false
+                  + host_pid                         = false
+                  + hostname                         = (known after apply)
+                  + node_name                        = (known after apply)
+                  + restart_policy                   = "Always"
+                  + scheduler_name                   = (known after apply)
+                  + service_account_name             = (known after apply)
+                  + share_process_namespace          = false
+                  + termination_grace_period_seconds = 30
+
+                  + container {
+                      + image                      = "dgsgiros/nginx-ssh:latest"
+                      + image_pull_policy          = (known after apply)
+                      + name                       = "nginx-ssh"
+                      + stdin                      = false
+                      + stdin_once                 = false
+                      + termination_message_path   = "/dev/termination-log"
+                      + termination_message_policy = (known after apply)
+                      + tty                        = false
+
+                      + port {
+                          + container_port = 80
+                          + name           = "http"
+                          + protocol       = "TCP"
+                        }
+                      + port {
+                          + container_port = 22
+                          + name           = "ssh"
+                          + protocol       = "TCP"
+                        }
+
+                      + readiness_probe {
+                          + failure_threshold     = 3
+                          + initial_delay_seconds = 3
+                          + period_seconds        = 5
+                          + success_threshold     = 1
+                          + timeout_seconds       = 1
+
+                          + http_get {
+                              + path   = "/"
+                              + port   = "80"
+                              + scheme = "HTTP"
+                            }
+                        }
+
+                      + resources (known after apply)
+
+                      + volume_mount {
+                          + mount_path        = "/usr/share/nginx/html"
+                          + mount_propagation = "None"
+                          + name              = "html-shared-vol"
+                          + read_only         = false
+                        }
+                      + volume_mount {
+                          + mount_path        = "/home/webuser/.ssh"
+                          + mount_propagation = "None"
+                          + name              = "web-ssh-dir"
+                          + read_only         = false
+                        }
+                      + volume_mount {
+                          + mount_path        = "/etc/ssh-secrets/pub"
+                          + mount_propagation = "None"
+                          + name              = "ssh-authkeys-secret"
+                          + read_only         = true
+                        }
+                    }
+
+                  + image_pull_secrets (known after apply)
+
+                  + init_container {
+                      + command                    = [
+                          + "/bin/sh",
+                          + "-c",
+                          + <<-EOT
+                                set -e
+                                sed -e "s/__POD_NAME__/${POD_NAME}/g" \
+                                    -e "s/__NODE_NAME__/${NODE_NAME}/g" \
+                                    -e "s/__POD_IP__/${POD_IP}/g" \
+                                    -e "s/__GROUP_NUMBER__/${GROUP_NUMBER}/g" \
+                                    /mnt/html-template/index.html > /usr/share/nginx/html/index.html
+                                chmod 0644 /usr/share/nginx/html/index.html
+                            EOT,
+                        ]
+                      + image                      = "dgsgiros/nginx-ssh:latest"
+                      + image_pull_policy          = (known after apply)
+                      + name                       = "generate-html"
+                      + stdin                      = false
+                      + stdin_once                 = false
+                      + termination_message_path   = "/dev/termination-log"
+                      + termination_message_policy = (known after apply)
+                      + tty                        = false
+
+                      + env {
+                          + name = "POD_NAME"
+
+                          + value_from {
+                              + field_ref {
+                                  + api_version = "v1"
+                                  + field_path  = "metadata.name"
+                                }
+                            }
+                        }
+                      + env {
+                          + name = "NODE_NAME"
+
+                          + value_from {
+                              + field_ref {
+                                  + api_version = "v1"
+                                  + field_path  = "spec.nodeName"
+                                }
+                            }
+                        }
+                      + env {
+                          + name = "POD_IP"
+
+                          + value_from {
+                              + field_ref {
+                                  + api_version = "v1"
+                                  + field_path  = "status.podIP"
+                                }
+                            }
+                        }
+                      + env {
+                          + name  = "GROUP_NUMBER"
+                          + value = "11"
+                        }
+
+                      + resources (known after apply)
+
+                      + volume_mount {
+                          + mount_path        = "/mnt/html-template"
+                          + mount_propagation = "None"
+                          + name              = "html-template-vol"
+                          + read_only         = true
+                        }
+                      + volume_mount {
+                          + mount_path        = "/usr/share/nginx/html"
+                          + mount_propagation = "None"
+                          + name              = "html-shared-vol"
+                          + read_only         = false
+                        }
+                    }
+                  + init_container {
+                      + command                    = [
+                          + "/bin/sh",
+                          + "-c",
+                          + <<-EOT
+                                set -e
+                                chmod 0700 /ssh-dir
+                                cp /mnt/ssh-secret/authorized_keys /ssh-dir/authorized_keys
+                                chmod 0600 /ssh-dir/authorized_keys
+                            EOT,
+                        ]
+                      + image                      = "dgsgiros/nginx-ssh:latest"
+                      + image_pull_policy          = (known after apply)
+                      + name                       = "setup-ssh-auth"
+                      + stdin                      = false
+                      + stdin_once                 = false
+                      + termination_message_path   = "/dev/termination-log"
+                      + termination_message_policy = (known after apply)
+                      + tty                        = false
+
+                      + resources (known after apply)
+
+                      + security_context {
+                          + allow_privilege_escalation = true
+                          + privileged                 = false
+                          + read_only_root_filesystem  = false
+                          + run_as_group               = "1000"
+                          + run_as_user                = "1000"
+                        }
+
+                      + volume_mount {
+                          + mount_path        = "/mnt/ssh-secret"
+                          + mount_propagation = "None"
+                          + name              = "ssh-authkeys-secret"
+                          + read_only         = true
+                        }
+                      + volume_mount {
+                          + mount_path        = "/ssh-dir"
+                          + mount_propagation = "None"
+                          + name              = "web-ssh-dir"
+                          + read_only         = false
+                        }
+                    }
+
+                  + readiness_gate (known after apply)
+
+                  + security_context {
+                      + fs_group = "1000"
+                    }
+
+                  + volume {
+                      + name = "html-template-vol"
+
+                      + config_map {
+                          + default_mode = "0444"
+                          + name         = "web-html-template"
+                        }
+                    }
+                  + volume {
+                      + name = "html-shared-vol"
+
+                      + empty_dir {}
+                    }
+                  + volume {
+                      + name = "ssh-authkeys-secret"
+
+                      + secret {
+                          + default_mode = "0440"
+                          + secret_name  = "web-ssh-authkeys"
+
+                          + items {
+                              + key  = "authorized_keys"
+                              + mode = "0440"
+                              + path = "authorized_keys"
+                            }
+                        }
+                    }
+                  + volume {
+                      + name = "web-ssh-dir"
+
+                      + empty_dir {}
+                    }
+                }
+            }
+        }
+    }
+
+  # kubernetes_ingress_class_v1.nginx will be created
+  + resource "kubernetes_ingress_class_v1" "nginx" {
+      + id = (known after apply)
+
+      + metadata {
+          + generation       = (known after apply)
+          + name             = "nginx-ingress-class"
+          + resource_version = (known after apply)
+          + uid              = (known after apply)
+        }
+
+      + spec {
+          + controller = "k8s.io/ingress-nginx"
+        }
+    }
+
+  # kubernetes_ingress_v1.web will be created
+  + resource "kubernetes_ingress_v1" "web" {
+      + id     = (known after apply)
+      + status = (known after apply)
+
+      + metadata {
+          + annotations      = {
+              + "nginx.ingress.kubernetes.io/rewrite-target" = "/"
+            }
+          + generation       = (known after apply)
+          + labels           = {
+              + "app"        = "web"
+              + "managed-by" = "terraform"
+            }
+          + name             = "web-ingress"
+          + namespace        = "default"
+          + resource_version = (known after apply)
+          + uid              = (known after apply)
+        }
+
+      + spec {
+          + ingress_class_name = "nginx-ingress-class"
+
+          + rule {
+              + http {
+                  + path {
+                      + path      = "/servers-G11"
+                      + path_type = "Prefix"
+
+                      + backend {
+                          + service {
+                              + name = "web-service"
+
+                              + port {
+                                  + number = 8080
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+  # kubernetes_manifest.vlan_dhcp will be created
+  + resource "kubernetes_manifest" "vlan_dhcp" {
+      + manifest = {
+          + apiVersion = "k8s.cni.cncf.io/v1"
+          + kind       = "NetworkAttachmentDefinition"
+          + metadata   = {
+              + name      = "vlan1000-dhcp"
+              + namespace = "default"
+            }
+          + spec       = {
+              + config = jsonencode(
+                    {
+                      + cniVersion = "0.3.1"
+                      + ipam       = {
+                          + type = "dhcp"
+                        }
+                      + master     = "e2.1000"
+                      + mode       = "bridge"
+                      + name       = "vlan1000-dhcp"
+                      + type       = "macvlan"
+                    }
+                )
+            }
+        }
+      + object   = {
+          + apiVersion = "k8s.cni.cncf.io/v1"
+          + kind       = "NetworkAttachmentDefinition"
+          + metadata   = {
+              + annotations                = (known after apply)
+              + creationTimestamp          = (known after apply)
+              + deletionGracePeriodSeconds = (known after apply)
+              + deletionTimestamp          = (known after apply)
+              + finalizers                 = (known after apply)
+              + generateName               = (known after apply)
+              + generation                 = (known after apply)
+              + labels                     = (known after apply)
+              + managedFields              = (known after apply)
+              + name                       = "vlan1000-dhcp"
+              + namespace                  = "default"
+              + ownerReferences            = (known after apply)
+              + resourceVersion            = (known after apply)
+              + selfLink                   = (known after apply)
+              + uid                        = (known after apply)
+            }
+          + spec       = {
+              + config = jsonencode(
+                    {
+                      + cniVersion = "0.3.1"
+                      + ipam       = {
+                          + type = "dhcp"
+                        }
+                      + master     = "e2.1000"
+                      + mode       = "bridge"
+                      + name       = "vlan1000-dhcp"
+                      + type       = "macvlan"
+                    }
+                )
+            }
+        }
+
+      + field_manager {
+          + force_conflicts = true
+        }
+    }
+
+  # kubernetes_manifest.vlan_static will be created
+  + resource "kubernetes_manifest" "vlan_static" {
+      + manifest = {
+          + apiVersion = "k8s.cni.cncf.io/v1"
+          + kind       = "NetworkAttachmentDefinition"
+          + metadata   = {
+              + name      = "vlan1000-static"
+              + namespace = "default"
+            }
+          + spec       = {
+              + config = jsonencode(
+                    {
+                      + capabilities = {
+                          + ips = true
+                        }
+                      + cniVersion   = "0.3.1"
+                      + ipam         = {
+                          + type = "static"
+                        }
+                      + master       = "e2.1000"
+                      + mode         = "bridge"
+                      + name         = "vlan1000-static"
+                      + type         = "macvlan"
+                    }
+                )
+            }
+        }
+      + object   = {
+          + apiVersion = "k8s.cni.cncf.io/v1"
+          + kind       = "NetworkAttachmentDefinition"
+          + metadata   = {
+              + annotations                = (known after apply)
+              + creationTimestamp          = (known after apply)
+              + deletionGracePeriodSeconds = (known after apply)
+              + deletionTimestamp          = (known after apply)
+              + finalizers                 = (known after apply)
+              + generateName               = (known after apply)
+              + generation                 = (known after apply)
+              + labels                     = (known after apply)
+              + managedFields              = (known after apply)
+              + name                       = "vlan1000-static"
+              + namespace                  = "default"
+              + ownerReferences            = (known after apply)
+              + resourceVersion            = (known after apply)
+              + selfLink                   = (known after apply)
+              + uid                        = (known after apply)
+            }
+          + spec       = {
+              + config = jsonencode(
+                    {
+                      + capabilities = {
+                          + ips = true
+                        }
+                      + cniVersion   = "0.3.1"
+                      + ipam         = {
+                          + type = "static"
+                        }
+                      + master       = "e2.1000"
+                      + mode         = "bridge"
+                      + name         = "vlan1000-static"
+                      + type         = "macvlan"
+                    }
+                )
+            }
+        }
+
+      + field_manager {
+          + force_conflicts = true
+        }
+    }
+
+  # kubernetes_network_policy_v1.allow_ingress_to_web will be created
+  + resource "kubernetes_network_policy_v1" "allow_ingress_to_web" {
+      + id = (known after apply)
+
+      + metadata {
+          + generation       = (known after apply)
+          + name             = "allow-ingress-to-web"
+          + namespace        = "default"
+          + resource_version = (known after apply)
+          + uid              = (known after apply)
+        }
+
+      + spec {
+          + policy_types = [
+              + "Ingress",
+            ]
+
+          + ingress {
+              + from {
+                  + namespace_selector {
+                      + match_labels = {
+                          + "kubernetes.io/metadata.name" = "ingress-nginx"
+                        }
+                    }
+                  + pod_selector {
+                      + match_labels = {
+                          + "app.kubernetes.io/component" = "controller"
+                          + "app.kubernetes.io/name"      = "ingress-nginx"
+                        }
+                    }
+                }
+              + ports {
+                  + port     = "80"
+                  + protocol = "TCP"
+                }
+            }
+
+          + pod_selector {
+              + match_labels = {
+                  + "app" = "web"
+                }
+            }
+        }
+    }
+
+  # kubernetes_network_policy_v1.allow_ssh_to_admin will be created
+  + resource "kubernetes_network_policy_v1" "allow_ssh_to_admin" {
+      + id = (known after apply)
+
+      + metadata {
+          + generation       = (known after apply)
+          + name             = "allow-ssh-to-admin"
+          + namespace        = "default"
+          + resource_version = (known after apply)
+          + uid              = (known after apply)
+        }
+
+      + spec {
+          + policy_types = [
+              + "Ingress",
+            ]
+
+          + ingress {
+              + from {
+                  + ip_block {
+                      + cidr = "10.10.20.2/32"
+                    }
+                }
+              + ports {
+                  + port     = "22"
+                  + protocol = "TCP"
+                }
+            }
+
+          + pod_selector {
+              + match_labels = {
+                  + "app" = "admin"
+                }
+            }
+        }
+    }
+
+  # kubernetes_network_policy_v1.default_deny_all will be created
+  + resource "kubernetes_network_policy_v1" "default_deny_all" {
+      + id = (known after apply)
+
+      + metadata {
+          + generation       = (known after apply)
+          + name             = "default-deny-all"
+          + namespace        = "default"
+          + resource_version = (known after apply)
+          + uid              = (known after apply)
+        }
+
+      + spec {
+          + policy_types = [
+              + "Ingress",
+              + "Egress",
+            ]
+
+          + pod_selector {
+            }
+        }
+    }
+
+  # kubernetes_pod_v1.admin will be created
+  + resource "kubernetes_pod_v1" "admin" {
+      + id = (known after apply)
+
+      + metadata {
+          + annotations      = {
+              + "k8s.v1.cni.cncf.io/networks" = jsonencode(
+                    [
+                      + {
+                          + ips  = [
+                              + "10.1.2.10/24",
+                            ]
+                          + name = "vlan1000-static"
+                        },
+                    ]
+                )
+            }
+          + generation       = (known after apply)
+          + labels           = {
+              + "app"        = "admin"
+              + "managed-by" = "terraform"
+              + "role"       = "management"
+            }
+          + name             = "admin"
+          + namespace        = "default"
+          + resource_version = (known after apply)
+          + uid              = (known after apply)
+        }
+
+      + spec {
+          + automount_service_account_token  = true
+          + dns_policy                       = "ClusterFirst"
+          + enable_service_links             = true
+          + host_ipc                         = false
+          + host_network                     = false
+          + host_pid                         = false
+          + hostname                         = (known after apply)
+          + node_name                        = (known after apply)
+          + node_selector                    = {
+              + "kubernetes.io/hostname" = "k8s-worker1"
+            }
+          + restart_policy                   = "Always"
+          + scheduler_name                   = (known after apply)
+          + service_account_name             = (known after apply)
+          + share_process_namespace          = false
+          + termination_grace_period_seconds = 30
+
+          + container {
+              + image                      = "dgsgiros/admin-ssh:latest"
+              + image_pull_policy          = (known after apply)
+              + name                       = "admin-ssh"
+              + stdin                      = false
+              + stdin_once                 = false
+              + termination_message_path   = "/dev/termination-log"
+              + termination_message_policy = (known after apply)
+              + tty                        = false
+
+              + port {
+                  + container_port = 22
+                  + name           = "ssh"
+                  + protocol       = "TCP"
+                }
+
+              + resources (known after apply)
+
+              + volume_mount {
+                  + mount_path        = "/home/adminuser/.ssh"
+                  + mount_propagation = "None"
+                  + name              = "admin-ssh-dir"
+                  + read_only         = false
+                }
+              + volume_mount {
+                  + mount_path        = "/etc/ssh-secrets/priv"
+                  + mount_propagation = "None"
+                  + name              = "ssh-private-key"
+                  + read_only         = true
+                }
+              + volume_mount {
+                  + mount_path        = "/etc/ssh-secrets/pub"
+                  + mount_propagation = "None"
+                  + name              = "ssh-authorized-keys"
+                  + read_only         = true
+                }
+            }
+
+          + image_pull_secrets (known after apply)
+
+          + init_container {
+              + command                    = [
+                  + "/bin/sh",
+                  + "-c",
+                  + <<-EOT
+                        set -e
+                        chmod 0700 /ssh-dir
+                        cp /mnt/ssh-priv/id_rsa /ssh-dir/id_rsa
+                        chmod 0600 /ssh-dir/id_rsa
+                        cp /mnt/ssh-pub/authorized_keys /ssh-dir/authorized_keys
+                        chmod 0600 /ssh-dir/authorized_keys
+                        cat > /ssh-dir/config <<'SSHCFG'
+                        Host 10.1.2.*
+                          IdentityFile ~/.ssh/id_rsa
+                          StrictHostKeyChecking accept-new
+                          UserKnownHostsFile ~/.ssh/known_hosts
+                        SSHCFG
+                        chmod 0600 /ssh-dir/config
+                    EOT,
+                ]
+              + image                      = "dgsgiros/admin-ssh:latest"
+              + image_pull_policy          = (known after apply)
+              + name                       = "setup-admin-ssh"
+              + stdin                      = false
+              + stdin_once                 = false
+              + termination_message_path   = "/dev/termination-log"
+              + termination_message_policy = (known after apply)
+              + tty                        = false
+
+              + resources (known after apply)
+
+              + security_context {
+                  + allow_privilege_escalation = true
+                  + privileged                 = false
+                  + read_only_root_filesystem  = false
+                  + run_as_group               = "1000"
+                  + run_as_user                = "1000"
+                }
+
+              + volume_mount {
+                  + mount_path        = "/mnt/ssh-priv"
+                  + mount_propagation = "None"
+                  + name              = "ssh-private-key"
+                  + read_only         = true
+                }
+              + volume_mount {
+                  + mount_path        = "/mnt/ssh-pub"
+                  + mount_propagation = "None"
+                  + name              = "ssh-authorized-keys"
+                  + read_only         = true
+                }
+              + volume_mount {
+                  + mount_path        = "/ssh-dir"
+                  + mount_propagation = "None"
+                  + name              = "admin-ssh-dir"
+                  + read_only         = false
+                }
+            }
+
+          + readiness_gate (known after apply)
+
+          + security_context {
+              + fs_group = "1000"
+            }
+
+          + volume {
+              + name = "ssh-private-key"
+
+              + secret {
+                  + default_mode = "0440"
+                  + secret_name  = "admin-ssh-privkey"
+
+                  + items {
+                      + key  = "id_rsa"
+                      + mode = "0440"
+                      + path = "id_rsa"
+                    }
+                }
+            }
+          + volume {
+              + name = "ssh-authorized-keys"
+
+              + secret {
+                  + default_mode = "0440"
+                  + secret_name  = "admin-ssh-authkeys"
+
+                  + items {
+                      + key  = "authorized_keys"
+                      + mode = "0440"
+                      + path = "authorized_keys"
+                    }
+                }
+            }
+          + volume {
+              + name = "admin-ssh-dir"
+
+              + empty_dir {}
+            }
+        }
+    }
+
+  # kubernetes_secret_v1.admin_ssh_authkeys will be created
+  + resource "kubernetes_secret_v1" "admin_ssh_authkeys" {
+      + data                           = (sensitive value)
+      + id                             = (known after apply)
+      + type                           = "Opaque"
+      + wait_for_service_account_token = true
+
+      + metadata {
+          + generation       = (known after apply)
+          + labels           = {
+              + "app"        = "admin"
+              + "managed-by" = "terraform"
+            }
+          + name             = "admin-ssh-authkeys"
+          + namespace        = "default"
+          + resource_version = (known after apply)
+          + uid              = (known after apply)
+        }
+    }
+
+  # kubernetes_secret_v1.admin_ssh_privkey will be created
+  + resource "kubernetes_secret_v1" "admin_ssh_privkey" {
+      + data                           = (sensitive value)
+      + id                             = (known after apply)
+      + type                           = "Opaque"
+      + wait_for_service_account_token = true
+
+      + metadata {
+          + generation       = (known after apply)
+          + labels           = {
+              + "app"        = "admin"
+              + "managed-by" = "terraform"
+            }
+          + name             = "admin-ssh-privkey"
+          + namespace        = "default"
+          + resource_version = (known after apply)
+          + uid              = (known after apply)
+        }
+    }
+
+  # kubernetes_secret_v1.web_ssh_authkeys will be created
+  + resource "kubernetes_secret_v1" "web_ssh_authkeys" {
+      + data                           = (sensitive value)
+      + id                             = (known after apply)
+      + type                           = "Opaque"
+      + wait_for_service_account_token = true
+
+      + metadata {
+          + generation       = (known after apply)
+          + labels           = {
+              + "app"        = "web"
+              + "managed-by" = "terraform"
+            }
+          + name             = "web-ssh-authkeys"
+          + namespace        = "default"
+          + resource_version = (known after apply)
+          + uid              = (known after apply)
+        }
+    }
+
+  # kubernetes_service_v1.admin will be created
+  + resource "kubernetes_service_v1" "admin" {
+      + id                     = (known after apply)
+      + status                 = (known after apply)
+      + wait_for_load_balancer = true
+
+      + metadata {
+          + generation       = (known after apply)
+          + labels           = {
+              + "app"        = "admin"
+              + "managed-by" = "terraform"
+            }
+          + name             = "admin-service"
+          + namespace        = "default"
+          + resource_version = (known after apply)
+          + uid              = (known after apply)
+        }
+
+      + spec {
+          + allocate_load_balancer_node_ports = true
+          + cluster_ip                        = (known after apply)
+          + cluster_ips                       = (known after apply)
+          + external_traffic_policy           = "Local"
+          + health_check_node_port            = (known after apply)
+          + internal_traffic_policy           = (known after apply)
+          + ip_families                       = (known after apply)
+          + ip_family_policy                  = (known after apply)
+          + publish_not_ready_addresses       = false
+          + selector                          = {
+              + "app" = "admin"
+            }
+          + session_affinity                  = "None"
+          + type                              = "NodePort"
+
+          + port {
+              + name        = "ssh"
+              + node_port   = 30022
+              + port        = 2222
+              + protocol    = "TCP"
+              + target_port = "22"
+            }
+
+          + session_affinity_config (known after apply)
+        }
+    }
+
+  # kubernetes_service_v1.web will be created
+  + resource "kubernetes_service_v1" "web" {
+      + id                     = (known after apply)
+      + status                 = (known after apply)
+      + wait_for_load_balancer = true
+
+      + metadata {
+          + generation       = (known after apply)
+          + labels           = {
+              + "app"        = "web"
+              + "managed-by" = "terraform"
+            }
+          + name             = "web-service"
+          + namespace        = "default"
+          + resource_version = (known after apply)
+          + uid              = (known after apply)
+        }
+
+      + spec {
+          + allocate_load_balancer_node_ports = true
+          + cluster_ip                        = (known after apply)
+          + cluster_ips                       = (known after apply)
+          + external_traffic_policy           = (known after apply)
+          + health_check_node_port            = (known after apply)
+          + internal_traffic_policy           = (known after apply)
+          + ip_families                       = (known after apply)
+          + ip_family_policy                  = (known after apply)
+          + publish_not_ready_addresses       = false
+          + selector                          = {
+              + "app" = "web"
+            }
+          + session_affinity                  = "None"
+          + type                              = "ClusterIP"
+
+          + port {
+              + name        = "http"
+              + node_port   = (known after apply)
+              + port        = 8080
+              + protocol    = "TCP"
+              + target_port = "80"
+            }
+
+          + session_affinity_config (known after apply)
+        }
+    }
+
+Plan: 15 to add, 0 to change, 0 to destroy.
+
+Changes to Outputs:
+  + admin_service_node_port     = 30022
+  + admin_ssh_command_from_host = "ssh -i keys/id_rsa_external -p 30022 adminuser@10.10.10.11"
+  + deployment_name             = "web-deployment"
+  + deployment_replicas         = "3"
+  + vlan_endpoints              = {
+      + admin_pod = "10.1.2.10"
+      + lxc_bbdd  = "10.1.2.100"
+      + lxc_logs  = "10.1.2.101"
+      + vlan_id   = 1000
+      + web_dhcp  = "10.1.2.50 - 10.1.2.95"
+    }
+  + web_ingress_url             = "http://10.10.10.20/servers-G11"
+  + web_pod_names               = (known after apply)
+  + web_service_cluster_ip      = (known after apply)
+kubernetes_secret_v1.admin_ssh_authkeys: Creating...
+kubernetes_config_map_v1.web_html_template: Creating...
+kubernetes_secret_v1.admin_ssh_privkey: Creating...
+kubernetes_ingress_class_v1.nginx: Creating...
+kubernetes_network_policy_v1.allow_ssh_to_admin: Creating...
+kubernetes_service_v1.web: Creating...
+kubernetes_service_v1.admin: Creating...
+kubernetes_network_policy_v1.allow_ingress_to_web: Creating...
+kubernetes_ingress_class_v1.nginx: Creation complete after 1s [id=nginx-ingress-class]
+kubernetes_secret_v1.web_ssh_authkeys: Creating...
+kubernetes_manifest.vlan_dhcp: Creating...
+kubernetes_secret_v1.admin_ssh_authkeys: Creation complete after 1s [id=default/admin-ssh-authkeys]
+kubernetes_config_map_v1.web_html_template: Creation complete after 1s [id=default/web-html-template]
+kubernetes_secret_v1.admin_ssh_privkey: Creation complete after 1s [id=default/admin-ssh-privkey]
+kubernetes_manifest.vlan_static: Creating...
+kubernetes_network_policy_v1.allow_ssh_to_admin: Creation complete after 1s [id=default/allow-ssh-to-admin]
+kubernetes_secret_v1.web_ssh_authkeys: Creation complete after 0s [id=default/web-ssh-authkeys]
+kubernetes_service_v1.web: Creation complete after 1s [id=default/web-service]
+kubernetes_network_policy_v1.allow_ingress_to_web: Creation complete after 1s [id=default/allow-ingress-to-web]
+kubernetes_service_v1.admin: Creation complete after 1s [id=default/admin-service]
+kubernetes_manifest.vlan_dhcp: Creation complete after 0s
+kubernetes_ingress_v1.web: Creating...
+kubernetes_ingress_v1.web: Creation complete after 0s [id=default/web-ingress]
+kubernetes_deployment_v1.web: Creating...
+kubernetes_manifest.vlan_static: Creation complete after 0s
+kubernetes_pod_v1.admin: Creating...
+kubernetes_deployment_v1.web: Still creating... [00m10s elapsed]
+kubernetes_pod_v1.admin: Still creating... [00m10s elapsed]
+kubernetes_deployment_v1.web: Still creating... [00m20s elapsed]
+kubernetes_pod_v1.admin: Still creating... [00m20s elapsed]
+

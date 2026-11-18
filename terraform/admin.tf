@@ -50,18 +50,19 @@ resource "kubernetes_pod_v1" "admin" {
         "-c",
         <<-EOT
           set -e
-          chmod 0700 /ssh-dir
-          cp /mnt/ssh-priv/id_rsa /ssh-dir/id_rsa
-          chmod 0600 /ssh-dir/id_rsa
-          cp /mnt/ssh-pub/authorized_keys /ssh-dir/authorized_keys
-          chmod 0600 /ssh-dir/authorized_keys
-          cat > /ssh-dir/config <<'SSHCFG'
+          mkdir -p /ssh-dir/dotssh
+          chmod 0700 /ssh-dir/dotssh
+          cp /mnt/ssh-priv/id_rsa /ssh-dir/dotssh/id_rsa
+          chmod 0600 /ssh-dir/dotssh/id_rsa
+          cp /mnt/ssh-pub/authorized_keys /ssh-dir/dotssh/authorized_keys
+          chmod 0600 /ssh-dir/dotssh/authorized_keys
+          cat > /ssh-dir/dotssh/config <<'SSHCFG'
           Host 10.1.2.*
             IdentityFile ~/.ssh/id_rsa
             StrictHostKeyChecking accept-new
             UserKnownHostsFile ~/.ssh/known_hosts
           SSHCFG
-          chmod 0600 /ssh-dir/config
+          chmod 0600 /ssh-dir/dotssh/config
         EOT
       ]
 
@@ -96,6 +97,7 @@ resource "kubernetes_pod_v1" "admin" {
       volume_mount {
         name       = "admin-ssh-dir"
         mount_path = "/home/adminuser/.ssh"
+        sub_path   = "dotssh"
       }
 
       volume_mount {

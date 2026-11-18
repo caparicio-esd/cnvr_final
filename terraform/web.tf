@@ -119,9 +119,10 @@ resource "kubernetes_deployment_v1" "web" {
             "-c",
             <<-EOT
               set -e
-              chmod 0700 /ssh-dir
-              cp /mnt/ssh-secret/authorized_keys /ssh-dir/authorized_keys
-              chmod 0600 /ssh-dir/authorized_keys
+              mkdir -p /ssh-dir/dotssh
+              chmod 0700 /ssh-dir/dotssh
+              cp /mnt/ssh-secret/authorized_keys /ssh-dir/dotssh/authorized_keys
+              chmod 0600 /ssh-dir/dotssh/authorized_keys
             EOT
           ]
 
@@ -161,6 +162,7 @@ resource "kubernetes_deployment_v1" "web" {
           volume_mount {
             name       = "web-ssh-dir"
             mount_path = "/home/webuser/.ssh"
+            sub_path   = "dotssh"
           }
 
           volume_mount {
